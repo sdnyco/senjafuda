@@ -13,8 +13,19 @@ This folder is the public, append-only export of **senjafuda**, a visitors' book
 | `tokens.jsonl` / `tokens.csv` | One row per visit token |
 | `answers.jsonl` / `answers.csv` | Long-format answers (`token_id`, `field`, `value`, …) |
 | `vocab/*.json` | Vocabulary snapshots referenced by `vocab_version` |
+| `exported_at` | ISO-8601 UTC timestamp of the export run (`now()` used for `effective_status`) |
 
-Exports run nightly (03:00 UTC) via GitHub Actions using a read-only database role.
+Exports run nightly (03:00 UTC) via GitHub Actions using a **read-only** database role. The job never writes to Postgres.
+
+## Export timestamp and `effective_status`
+
+- `exported_at` is the instant the dump was taken.
+- `status` is the **stored** value in the database (unchanged by export).
+- `effective_status` is derived at export time (same rules as `/record` aggregates):
+  - `expired` when `status IN ('issued', 'partial')` **and** `expires_at <= exported_at`
+  - otherwise equal to `status`
+
+The live app may still **lazily** rewrite a row to `expired` when that token is accessed; export does not. Prefer `effective_status` (and `exported_at`) when comparing a dump to `/record` at a similar time.
 
 ## Token statuses
 
@@ -25,7 +36,7 @@ Exports run nightly (03:00 UTC) via GitHub Actions using a read-only database ro
 | `signed` | Committed entry (may be empty) |
 | `declined` | Explicit decline (optional `decline_reason` answer) |
 | `branched` | Conflicting answers or fast-sweep; **kept in raw data**, exclude from clean distributions |
-| `expired` | Timed out while `issued` or `partial` |
+| `expired` | Timed out while `issued` or `partial` (stored after lazy access, or only as `effective_status` until then) |
 
 Also: `rate_limited` (boolean on the token) means this token hit an answer/commit rate limit at least once. Rate-limited signed entries **remain** in distributions; branched tokens do not.
 
@@ -37,7 +48,7 @@ Also: `rate_limited` (boolean on the token) means this token hit an answer/commi
 - `path` is `link` or `form`.
 - Decline reasons use `field = "decline_reason"`.
 
-For clean field distributions, filter `tokens.status NOT IN ('branched')` (and usually join only `signed` / `partial` / `declined` as needed).
+For clean field distributions, filter `tokens.status NOT IN ('branched')` (and usually join only `signed` / `partial` / `declined` as needed). When using dumps, you may prefer `effective_status` over `status` for issued/partial/expired splits.
 
 ## User-agent fields
 

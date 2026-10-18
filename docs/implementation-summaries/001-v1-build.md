@@ -103,3 +103,14 @@ Added always-on `.cursor/rules/no-prod-seed.mdc`: never run seed / write-delete 
 ## Follow-up (2026-10-18): broader production env fail-closed
 
 Extended `scripts/check-prod-config.mjs` and `src/lib/env-guards.ts` (`assertProductionConfig`): when `VERCEL_ENV === "production"`, missing **any** of `DATABASE_URL`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `IP_HASH_PEPPER`, or `SITE_ORIGIN` fails the build and throws at runtime (`getDb` / `getRedis`). Same pattern as the original Upstash-only gate. Documented in `docs/deploy.md`.
+
+## Follow-up (2026-10-18): read-only export + `effective_status`
+
+Spec Rev 1’s “export job also marks expired before dumping” is **superseded**. The nightly export connects as `senjafuda_export` (SELECT-only) and must never write.
+
+- Removed the `UPDATE tokens … expired` from `scripts/export.ts`.
+- Shared helper `src/lib/effective-status.ts`: `effectiveStatus()` (TS) and `effectiveStatusSql()` (Postgres). `expired` when stored status is `issued`/`partial` and `expires_at <= asOf`; else equals stored `status`.
+- Export emits stored `status` plus `effective_status` (as of `exported_at`), and writes `data/exported_at`.
+- `/record` status totals and UA breakdowns group by the same SQL derivation so page and dump agree.
+- Lazy expiry-on-access in the app unchanged.
+- Documented in `data/README.md`.

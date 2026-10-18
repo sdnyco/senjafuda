@@ -1,6 +1,7 @@
 /**
  * Nightly export: dump tokens + answers to /data and copy vocab.
- * Usage: DATABASE_URL_READONLY=... pnpm exec tsx scripts/export.ts
+ * Read-only — never UPDATE. Usage:
+ *   DATABASE_URL_READONLY=... pnpm exec tsx scripts/export.ts
  */
 import "dotenv/config";
 import { createHash } from "crypto";
@@ -14,9 +15,9 @@ import {
 import path from "path";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-serverless";
-import { sql } from "drizzle-orm";
 import ws from "ws";
 import { answers, tokens } from "../src/db/schema";
+import { effectiveStatus } from "../src/lib/effective-status";
 
 neonConfig.webSocketConstructor = ws;
 
@@ -31,15 +32,9 @@ async function main() {
   const url = process.env.DATABASE_URL_READONLY || process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL_READONLY (or DATABASE_URL) is required");
 
+  const exportedAt = new Date();
   const pool = new Pool({ connectionString: url });
   const db = drizzle(pool);
-
-  await db.execute(sql`
-    UPDATE tokens
-    SET status = 'expired', completed_at = COALESCE(completed_at, now())
-    WHERE status IN ('issued', 'partial')
-      AND expires_at <= now()
-  `);
 
   const tokenRows = await db.select().from(tokens);
   const answerRows = await db.select().from(answers);
@@ -59,6 +54,7 @@ async function main() {
         ua_class: r.uaClass,
         ua_family: r.uaFamily,
         status: r.status,
+        effective_status: effectiveStatus(r.status, r.expiresAt, exportedAt),
         completed_at: r.completedAt ? r.completedAt.toISOString() : null,
         rate_limited: r.rateLimited,
       }),
@@ -88,7 +84,7 @@ async function main() {
   );
 
   const tokenCsvHeader =
-    "id,issued_at,expires_at,vocab_version,ua_rules_version,ua_class,ua_family,status,completed_at,rate_limited\n";
+    "id,issued_at,expires_at,vocab_version,ua_rules_version,ua_class,ua_family,status,effective_status,completed_at,rate_limited\n";
   const tokenCsv = tokenRows
     .map((r) =>
       [
@@ -100,6 +96,7 @@ async function main() {
         r.uaClass,
         r.uaFamily,
         r.status,
+        effectiveStatus(r.status, r.expiresAt, exportedAt),
         r.completedAt ? r.completedAt.toISOString() : "",
         r.rateLimited,
       ]
@@ -139,9 +136,15 @@ async function main() {
     }
   }
 
+  writeFileSync(
+    path.join(dataDir, "exported_at"),
+    exportedAt.toISOString() + "\n",
+  );
+
   const fingerprint = createHash("sha256")
     .update(tokensJsonl)
     .update(answersJsonl)
+    .update(exportedAt.toISOString())
     .digest("hex");
   writeFileSync(path.join(dataDir, ".export-fingerprint"), fingerprint + "\n");
 
@@ -150,7 +153,9 @@ async function main() {
   }
 
   await pool.end();
-  console.log(`Exported ${tokenRows.length} tokens, ${answerRows.length} answers.`);
+  console.log(
+    `Exported ${tokenRows.length} tokens, ${answerRows.length} answers at ${exportedAt.toISOString()} (read-only).`,
+  );
 }
 
 main().catch((err) => {

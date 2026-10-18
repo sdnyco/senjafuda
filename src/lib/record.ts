@@ -1,19 +1,21 @@
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { answers, tokens } from "@/db/schema";
+import { effectiveStatusSql } from "./effective-status";
 import { activeFields, loadVocab } from "./vocab";
 
 export async function loadRecordData() {
   const db = getDb();
   const vocab = loadVocab();
+  const eff = effectiveStatusSql();
 
   const statusRows = await db
     .select({
-      status: tokens.status,
+      status: eff,
       count: sql<number>`count(*)::int`,
     })
     .from(tokens)
-    .groupBy(tokens.status);
+    .groupBy(eff);
 
   const byStatus: Record<string, number> = {};
   for (const row of statusRows) {
@@ -31,11 +33,11 @@ export async function loadRecordData() {
   const uaRows = await db
     .select({
       uaClass: tokens.uaClass,
-      status: tokens.status,
+      status: eff,
       count: sql<number>`count(*)::int`,
     })
     .from(tokens)
-    .groupBy(tokens.uaClass, tokens.status);
+    .groupBy(tokens.uaClass, eff);
 
   const fields = activeFields(vocab);
   const distributions: {

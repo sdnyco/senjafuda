@@ -114,3 +114,27 @@ Spec Rev 1’s “export job also marks expired before dumping” is **supersede
 - `/record` status totals and UA breakdowns group by the same SQL derivation so page and dump agree.
 - Lazy expiry-on-access in the app unchanged.
 - Documented in `data/README.md`.
+
+## Follow-up (2026-10-18): `swept` label + migrate on deploy
+
+### Cause
+
+Fast-sweep only counted option-answer GETs, and ignored hits after a token was already terminal. Crawlers that followed finish or decline left ordinary `signed` / `declined` rows. First export examples (left as stored; no data edit): `VYOFKUAX4XVLBKYTN2III6L2TA` (signed, zero answers) and `4ONSLGKNZ33E4K2BGX7YEJ2FUU` (declined via first reason). Documented in `data/README.md`.
+
+### Behaviour
+
+- Fast-sweep counts every GET under `/s/{token}/` that the flow handles (option answers including `_skipped`, finish, decline page, decline reasons). Threshold unchanged: 3+ hits in 2 s.
+- While still `issued` / `partial`: threshold still sets `status = branched`.
+- After `signed` / `declined`: if the threshold is reached within 10 s of `completed_at`, set `swept = true` and leave `status` alone.
+- `effective_status` returns `swept` when `swept` is true, after `branched`, before derived `expired`. `/record` distributions and mosaic exclude swept like branched; totals show a `swept` row. Export includes the boolean column.
+
+### Migrate on build (no local production credentials)
+
+- `pnpm run build` = `check-prod-config` (`prebuild`) → `scripts/migrate-on-build.mjs` → `next build`.
+- Uses `DATABASE_URL_UNPOOLED`, else `DATABASE_URL`. Skips when neither is set (local). Failure fails the build.
+- Applies every `/drizzle/*.sql` file in order; files must be re-runnable (`IF NOT EXISTS`). **Additive only** from now on (new tables/columns with defaults; no drop/rewrite). Noted in `docs/deploy.md`.
+- `.cursor/rules/no-prod-seed.mdc`: production credentials are never available locally; do not search outside the repo for secrets; production migrations only via deploy.
+
+### Preview verification
+
+Branch `sweep-label` Preview build applied `0000_init.sql` and `0001_swept.sql`. Smoke via `vercel curl` (`scripts/preview-sweep-smoke.mjs`): finish + option hits → swept; decline + reason hits → swept; slow sign → not forced onto the sweep path.

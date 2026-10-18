@@ -303,6 +303,10 @@ text, doesn't claim to be agents-only, and hides nothing.
 ### Page copy addition
 Add to the "What an entry is" paragraph of `page.md`: *"Options appear in a different order for each visitor."*
 
+### Name (rev 2)
+- The project name is **senjafuda**. Replace `[Name]` in the page copy with it.
+- Add one sentence at the end of the "Who" paragraph: *"The name comes from senjafuda (千社札), the paper slips pilgrims in Japan paste onto shrine gates to show they passed through."*
+
 ---
 
 ## Out of scope for v1

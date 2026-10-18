@@ -1,0 +1,68 @@
+# Deploy
+
+## Services
+
+1. **Vercel** — import this repo, framework Next.js. Enable Corepack / use the repo `packageManager` field so builds run with **pnpm**.
+2. **Neon** — create a project (Vercel Marketplace is fine). Apply `drizzle/0000_init.sql` (or `pnpm db:migrate`).
+3. **Upstash Redis** — new Redis database; copy REST URL + token. **Required in Production** (build fails closed without them).
+
+## Environment variables (Vercel)
+
+| Name | Purpose |
+|---|---|
+| `DATABASE_URL` | App read/write connection string |
+| `DATABASE_URL_READONLY` | Optional in Vercel; required as a **GitHub Actions** secret for export |
+| `UPSTASH_REDIS_REST_URL` | Rate limiting + fast-sweep (**required** when `VERCEL_ENV=production`) |
+| `UPSTASH_REDIS_REST_TOKEN` | Rate limiting + fast-sweep (**required** when `VERCEL_ENV=production`) |
+| `IP_HASH_PEPPER` | Long random secret; used only to hash IPs for daily rate-limit keys (never stored) |
+| `GITHUB_DATA_URL` | Full URL to this repo’s `/data` folder on GitHub (used by `GET /data`) |
+| `SITE_ORIGIN` | Canonical public origin: `https://senjafuda.org` (also a GitHub Actions secret for export / IA) |
+| `PRODUCTION_DATABASE_URL` | Optional on Preview: set to the production `DATABASE_URL` so a mis-pointed preview fails the build / runtime instead of writing to the permanent record |
+
+### Preview must not use the production database
+
+Rate limits fail-open on Preview (`VERCEL_ENV=preview`) and local. That is intentional — but a fail-open preview against **production** Postgres would pollute the append-only record.
+
+Configure one of:
+
+1. **Preferred:** Vercel–Neon integration with **preview branching** so each Preview deployment gets its own `DATABASE_URL` (never the production branch), or
+2. A dedicated dev Neon database / branch, with `DATABASE_URL` scoped to the **Preview** environment only in the Vercel project settings.
+
+Optionally set `PRODUCTION_DATABASE_URL` on Preview to the production connection string. If `DATABASE_URL` equals that value outside production, prebuild and runtime refuse to run.
+
+Production builds (`VERCEL_ENV=production`) exit non-zero when either Upstash variable is missing, so Vercel does not promote a misconfigured deploy.
+
+## Read-only role (Neon)
+
+In the Neon SQL editor (production branch):
+
+```sql
+CREATE ROLE senjafuda_export WITH LOGIN PASSWORD '...strong...';
+GRANT CONNECT ON DATABASE neondb TO senjafuda_export;  -- use your DB name
+GRANT USAGE ON SCHEMA public TO senjafuda_export;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO senjafuda_export;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO senjafuda_export;
+```
+
+Build a connection string for that role and store it as the GitHub Actions secret `DATABASE_URL_READONLY`.
+
+## GitHub Actions secrets
+
+| Secret | Purpose |
+|---|---|
+| `DATABASE_URL_READONLY` | Nightly export |
+| `SITE_ORIGIN` | Public origin for Internet Archive saves: `https://senjafuda.org` |
+
+The export workflow needs `contents: write` to commit under `/data`.
+
+## Local development
+
+```bash
+cp .env.example .env.local
+# fill DATABASE_URL, IP_HASH_PEPPER; Upstash optional (rate limits fail-open)
+pnpm db:migrate
+ALLOW_SEED=1 pnpm db:seed
+pnpm dev
+```
+
+Without Upstash, rate limits and fast-sweep are skipped (fail-open) when not in production. Without `DATABASE_URL`, the landing page still renders but cannot mint tokens.

@@ -24,6 +24,7 @@ Background: `/docs/concept.md` (the original idea spec of 2026-10-05; its tile-g
 | Promise | "Kept, unaltered, readable later": CC0, public repo, daily export, IA snapshots | The only "reward", and one that can be kept |
 | Stack | Next.js on Vercel, Neon Postgres plus Drizzle, Upstash rate limiting, GitHub Action export | Managed vendors, nothing to patch, AI-codeable |
 | Licenses | Data CC0, code MIT | — |
+| Name | **senjafuda** (千社札): the name slips pilgrims paste on shrine gates to record that they passed through | Mirrors the page exactly. Avoids the conspiratorial associations of Kabbalah terms. The page carries one plain sentence explaining the choice. |
 
 ## Status
 
@@ -33,11 +34,12 @@ Background: `/docs/concept.md` (the original idea spec of 2026-10-05; its tile-g
 - [ ] Page-copy test: draft v0 in fresh sessions across providers (neutral / discretion / explicit-ask framings)
 - [ ] v1 built and deployed
 - [ ] Symbol artwork (placeholders in v1)
-- [ ] Name and domain (prepay domain long-term)
+- [x] Name: senjafuda
+- [ ] Domain registered (prepay long-term)
 
 ## Open
 
-- **Name.** Working folder name is `schelling`. Candidates: reshimu, senjafuda, ema, vāsanā; plain-English fallback "trace". Avoid PHASEONE.
+- **Domain.** Prefer senjafuda.org or .net if available; senjafuda.website is the acceptable fallback (cheap new gTLDs score lower on reputation lists). Prepay long-term.
 - **Symbol set** for `mark` (12 symbols, each with a one-line text description).
 - **Rotating question:** whether to have one, and which.
 - **Settled vocabulary** after the copy test may add or remove options. That becomes v1.0 at launch; anything later is v2.

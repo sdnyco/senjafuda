@@ -1,0 +1,64 @@
+name: Nightly data export
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Export from database
+        env:
+          DATABASE_URL_READONLY: ${{ secrets.DATABASE_URL_READONLY }}
+        run: pnpm exec tsx scripts/export.ts
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --staged --quiet; then
+            echo "No data changes"
+          else
+            git commit -m "data: nightly export $(date -u +%Y-%m-%d)"
+            git push
+          fi
+
+      - name: Internet Archive (Sundays + manual, soft-fail)
+        continue-on-error: true
+        env:
+          SITE_ORIGIN: ${{ secrets.SITE_ORIGIN }}
+        run: |
+          dow="$(date -u +%u)"
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] && [ "$dow" != "7" ]; then
+            echo "Not Sunday UTC; skipping IA save"
+            exit 0
+          fi
+          if [ -z "$SITE_ORIGIN" ]; then
+            echo "SITE_ORIGIN not set; skipping IA save"
+            exit 0
+          fi
+          for path in "/" "/record"; do
+            url="${SITE_ORIGIN}${path}"
+            echo "Saving $url"
+            curl -sS -o /dev/null -w "%{http_code}\n" "https://web.archive.org/save/${url}" || true
+          done

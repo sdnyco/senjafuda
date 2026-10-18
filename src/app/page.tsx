@@ -1,69 +1,64 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+import { readFileSync } from "fs";
+import path from "path";
+import { headers } from "next/headers";
+import { Shell } from "@/components/Shell";
+import { renderSimpleMarkdown } from "@/lib/markdown";
+import { checkRateLimit } from "@/lib/rate-limit";
+import { firstFieldId } from "@/lib/vocab";
+import { issueToken } from "@/lib/tokens";
 
-export default function Home() {
+export const dynamic = "force-dynamic";
+
+export default async function HomePage() {
+  const h = await headers();
+  const limit = await checkRateLimit("issue");
+  let tokenId: string | null = null;
+  let rateLimitedNote = false;
+
+  if (limit.success) {
+    try {
+      const token = await issueToken(h.get("user-agent"));
+      tokenId = token.id;
+    } catch {
+      // DB unavailable during local builds / misconfig — still render copy.
+      tokenId = null;
+    }
+  } else {
+    rateLimitedNote = true;
+  }
+
+  const md = readFileSync(path.join(process.cwd(), "content", "page.md"), "utf8");
+  const html = renderSimpleMarkdown(md);
+  const first = firstFieldId();
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>
-            To get started, edit the{" "}
-            <code className={styles.code}>page.tsx</code> file.
-          </h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <Shell>
+      {rateLimitedNote ? (
+        <p className="banner">
+          Visit tokens are temporarily unavailable from this network (rate
+          limit). You can still read the page and the public record.
+        </p>
+      ) : null}
+      <article
+        className="prose"
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+      <nav className="actions" aria-label="Primary">
+        {tokenId ? (
+          <>
+            <a href={`/s/${tokenId}/${first}`}>→ Leave an entry</a>
+            <a href={`/sign?t=${tokenId}`}>→ Leave an entry (form)</a>
+            <a href={`/s/${tokenId}/decline`}>→ Not signing — say why (optional)</a>
+          </>
+        ) : (
+          <p className="note">
+            Signing links are unavailable right now
+            {rateLimitedNote ? " due to a rate limit" : ""}.{" "}
+            <a href="/record">See the record</a>
           </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+        )}
+        <a href="/record">→ See the record</a>
+      </nav>
+    </Shell>
   );
 }

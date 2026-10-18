@@ -1,0 +1,11 @@
+---
+description: Never seed or write destructive scripts against the production database
+alwaysApply: true
+---
+
+# No production seed / unsafe DB writes
+
+- Never run `pnpm db:seed`, `scripts/seed.ts`, or any write/delete script against the production database.
+- Never set `ALLOW_SEED` when `DATABASE_URL` may point at production.
+- If unsure which database `DATABASE_URL` targets, stop and ask.
+- Migrations against production only when the user explicitly asks in that message.

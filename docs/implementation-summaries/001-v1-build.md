@@ -82,3 +82,24 @@ Rate limits stay fail-open on Preview, so a Preview deploy pointed at production
 ### 4. Canonical origin
 
 `SITE_ORIGIN=https://senjafuda.org` in `.env.example` (with a note that the same value is required as a GitHub Actions secret for export / Internet Archive saves) and in `docs/deploy.md`.
+
+## Follow-up (2026-10-18): seed must never touch production
+
+### Cursor rule
+
+Added always-on `.cursor/rules/no-prod-seed.mdc`: never run seed / write-delete scripts against production; never set `ALLOW_SEED` when `DATABASE_URL` may be production; stop and ask if unsure; production migrations only when the user explicitly asks in that message.
+
+### `scripts/seed.ts` guards (all before any write)
+
+- Refuse if `VERCEL_ENV === "production"`.
+- Every seeded token id is prefixed with `seed_` (e.g. `seed_signed_001`). Before insert, abort if any existing `tokens.id` does **not** start with `seed_` ("database contains real entries — refusing to seed").
+- Print the `DATABASE_URL` host (no credentials) and require `SEED_CONFIRM_HOST` to equal it exactly.
+- Still requires `ALLOW_SEED=1`. Loads `.env.local` then `.env`.
+
+### Docs
+
+`docs/deploy.md` / README / `.env.example`: local `.env.local` must point at a Neon **dev** branch; seed examples include `SEED_CONFIRM_HOST`.
+
+## Follow-up (2026-10-18): broader production env fail-closed
+
+Extended `scripts/check-prod-config.mjs` and `src/lib/env-guards.ts` (`assertProductionConfig`): when `VERCEL_ENV === "production"`, missing **any** of `DATABASE_URL`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `IP_HASH_PEPPER`, or `SITE_ORIGIN` fails the build and throws at runtime (`getDb` / `getRedis`). Same pattern as the original Upstash-only gate. Documented in `docs/deploy.md`.

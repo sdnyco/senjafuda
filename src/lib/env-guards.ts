@@ -1,10 +1,18 @@
 /**
  * Production / preview env safety.
- * - Production must never run without Upstash (rate limits + fast-sweep).
+ * - Production must never run without required config (DB, Upstash, pepper, origin).
  * - Non-production must never share the production DATABASE_URL when we can tell.
  *
  * Keep behaviour aligned with scripts/check-prod-config.mjs (prebuild gate).
  */
+
+const PRODUCTION_REQUIRED = [
+  "DATABASE_URL",
+  "UPSTASH_REDIS_REST_URL",
+  "UPSTASH_REDIS_REST_TOKEN",
+  "IP_HASH_PEPPER",
+  "SITE_ORIGIN",
+] as const;
 
 export function isProductionEnv(): boolean {
   return process.env.VERCEL_ENV === "production";
@@ -16,13 +24,21 @@ export function upstashConfigComplete(): boolean {
   return Boolean(url && token);
 }
 
-/** Throw when production is missing either Upstash credential. */
-export function assertUpstashForProduction(): void {
+function missingProductionEnv(): string[] {
+  return PRODUCTION_REQUIRED.filter((key) => !process.env[key]);
+}
+
+/**
+ * Throw when production is missing any required env var.
+ * Defense in depth if env is changed after a successful build.
+ */
+export function assertProductionConfig(): void {
   if (!isProductionEnv()) return;
-  if (upstashConfigComplete()) return;
+  const missing = missingProductionEnv();
+  if (missing.length === 0) return;
   throw new Error(
-    "Production requires UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN. " +
-      "A misconfigured deploy must not run without rate limiting.",
+    `Production requires ${PRODUCTION_REQUIRED.join(", ")}. Missing: ${missing.join(", ")}. ` +
+      "A misconfigured deploy must not run.",
   );
 }
 

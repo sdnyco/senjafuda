@@ -10,13 +10,13 @@
 
 | Name | Purpose |
 |---|---|
-| `DATABASE_URL` | App read/write connection string |
+| `DATABASE_URL` | App read/write connection string (**required** in production) |
 | `DATABASE_URL_READONLY` | Optional in Vercel; required as a **GitHub Actions** secret for export |
 | `UPSTASH_REDIS_REST_URL` | Rate limiting + fast-sweep (**required** when `VERCEL_ENV=production`) |
 | `UPSTASH_REDIS_REST_TOKEN` | Rate limiting + fast-sweep (**required** when `VERCEL_ENV=production`) |
-| `IP_HASH_PEPPER` | Long random secret; used only to hash IPs for daily rate-limit keys (never stored) |
+| `IP_HASH_PEPPER` | Long random secret; used only to hash IPs for daily rate-limit keys (**required** in production) |
 | `GITHUB_DATA_URL` | Full URL to this repo’s `/data` folder on GitHub (used by `GET /data`) |
-| `SITE_ORIGIN` | Canonical public origin: `https://senjafuda.org` (also a GitHub Actions secret for export / IA) |
+| `SITE_ORIGIN` | Canonical public origin: `https://senjafuda.org` (**required** in production; also a GitHub Actions secret for export / IA) |
 | `PRODUCTION_DATABASE_URL` | Optional on Preview: set to the production `DATABASE_URL` so a mis-pointed preview fails the build / runtime instead of writing to the permanent record |
 
 ### Preview must not use the production database
@@ -30,7 +30,7 @@ Configure one of:
 
 Optionally set `PRODUCTION_DATABASE_URL` on Preview to the production connection string. If `DATABASE_URL` equals that value outside production, prebuild and runtime refuse to run.
 
-Production builds (`VERCEL_ENV=production`) exit non-zero when either Upstash variable is missing, so Vercel does not promote a misconfigured deploy.
+Production builds (`VERCEL_ENV=production`) exit non-zero when any of `DATABASE_URL`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `IP_HASH_PEPPER`, or `SITE_ORIGIN` is missing, so Vercel does not promote a misconfigured deploy. Runtime throws under the same condition.
 
 ## Read-only role (Neon)
 
@@ -57,12 +57,17 @@ The export workflow needs `contents: write` to commit under `/data`.
 
 ## Local development
 
+Point local `.env.local` at a **Neon dev branch** (or a dedicated non-production database)—never at the production branch. Production is append-only; seed data must not land there.
+
 ```bash
 cp .env.example .env.local
-# fill DATABASE_URL, IP_HASH_PEPPER; Upstash optional (rate limits fail-open)
+# fill DATABASE_URL (dev branch), IP_HASH_PEPPER; Upstash optional (rate limits fail-open)
 pnpm db:migrate
-ALLOW_SEED=1 pnpm db:seed
+# Seed only against the confirmed host (prints the target host if SEED_CONFIRM_HOST is wrong):
+SEED_CONFIRM_HOST=<exact-host-from-DATABASE_URL> ALLOW_SEED=1 pnpm db:seed
 pnpm dev
 ```
+
+`scripts/seed.ts` also refuses when `VERCEL_ENV=production`, when any existing token id does not start with `seed_`, or when `SEED_CONFIRM_HOST` does not match the `DATABASE_URL` host exactly.
 
 Without Upstash, rate limits and fast-sweep are skipped (fail-open) when not in production. Without `DATABASE_URL`, the landing page still renders but cannot mint tokens.

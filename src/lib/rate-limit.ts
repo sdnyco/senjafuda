@@ -1,6 +1,6 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
-import { assertUpstashForProduction, upstashConfigComplete } from "./env-guards";
+import { assertProductionConfig, upstashConfigComplete } from "./env-guards";
 import { clientIp, rateLimitKey } from "./ip-hash";
 
 type LimitKind = "issue" | "answer" | "commit";
@@ -9,9 +9,9 @@ let redis: Redis | null = null;
 const limiters: Partial<Record<LimitKind, Ratelimit>> = {};
 
 function getRedis(): Redis | null {
-  // Defense in depth: production must never proceed without Upstash, even if
-  // env vars were removed after a successful build.
-  assertUpstashForProduction();
+  // Defense in depth: production must never proceed without required env, even
+  // if vars were removed after a good build.
+  assertProductionConfig();
   if (!upstashConfigComplete()) return null;
   const url = process.env.UPSTASH_REDIS_REST_URL!;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN!;

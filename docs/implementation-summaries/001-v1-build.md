@@ -1,7 +1,7 @@
 # Implementation summary — 001 v1 build
 
 **Date:** 2026-10-18  
-**Spec:** `/docs/specs/001-v1-build.md` (including Revision 1; name rev 2)
+**Spec:** `/docs/specs/001-v1-build-spec.md` (including Revision 1; name rev 2)
 
 ## Rename (rev 2)
 

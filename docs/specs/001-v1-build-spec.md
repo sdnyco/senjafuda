@@ -240,7 +240,7 @@ text, doesn't claim to be agents-only, and hides nothing.
 - `signed`: set via "finish now" or after the last step. **An empty sign is allowed.** Zero answers is still data.
 - `declined`: allowed from `issued` or `partial`. Any answers already given are kept. "Started, then declined" is meaningful.
 - `branched`: see below.
-- `expired`: set lazily on access after `expires_at` if the token is still `issued`/`partial`. The export job also marks it before dumping, so exports are consistent.
+- `expired`: set lazily on access after `expires_at` if the token is still `issued`/`partial`. *(Superseded 2026-10-18: the export never writes. It emits a derived `effective_status`, computed at read time, alongside the stored `status`. `/record` uses the same derivation.)*
 - **Terminal states** (`signed`, `declined`, `branched`, `expired`) accept no further writes and show an "already recorded" page.
 
 ### Answers
@@ -306,6 +306,28 @@ Add to the "What an entry is" paragraph of `page.md`: *"Options appear in a diff
 ### Name (rev 2)
 - The project name is **senjafuda**. Replace `[Name]` in the page copy with it.
 - Add one sentence at the end of the "Who" paragraph: *"The name comes from senjafuda (千社札), the paper slips pilgrims in Japan paste onto shrine gates to show they passed through."*
+
+---
+
+## Revision 3: crawler sweeps and migrate-on-deploy (2026-10-18)
+
+> These decisions come from the first live day. **Where this section conflicts with anything above, this section wins.**
+
+### `swept` label (supersedes "count option-answer GETs only")
+- Fast-sweep counts **every** GET under `/s/{token}/`: option answers, `_skipped`, finish, the decline page and decline reasons. The threshold is unchanged: 3 or more hits in 2 s.
+- While a token is `issued`/`partial`, reaching the threshold sets `status = branched`.
+- After `signed`/`declined`, reaching the threshold within 10 s of `completed_at` sets the boolean `swept = true`. `status` is left alone; this is an added label, not a rewrite.
+- `effective_status` precedence: `branched` > `swept` > derived `expired` > stored status.
+- `/record` distributions and the mosaic exclude `swept` exactly like `branched`. Totals show it as its own row.
+- Two pre-fix entries are crawler-generated and stay as stored: `VYOFK…` (empty sign) and `4ONS…` (decline). `/data/README.md` documents them.
+
+### Migrations run on deploy
+- The build sequence is: config gate → migrations (unpooled URL) → `next build`. A failed migration fails the build.
+- Production credentials never exist locally. Production migrates only by merging to `main`. Each preview migrates its own Neon branch first.
+- **Additive only**: new tables or columns with defaults. Migration files must be re-runnable (`IF NOT EXISTS`), because every build applies all of them.
+
+### Docs naming
+- Spec files end in `-spec.md` (this file: `001-v1-build-spec.md`). Implementation summaries keep the bare name.
 
 ---
 

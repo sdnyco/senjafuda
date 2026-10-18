@@ -1,11 +1,13 @@
 ---
-description: Never seed or write destructive scripts against the production database
+description: Never seed production or look for production credentials; migrations only via deploy
 alwaysApply: true
 ---
 
-# No production seed / unsafe DB writes
+# No production seed / local production credentials
 
 - Never run `pnpm db:seed`, `scripts/seed.ts`, or any write/delete script against the production database.
 - Never set `ALLOW_SEED` when `DATABASE_URL` may point at production.
 - If unsure which database `DATABASE_URL` targets, stop and ask.
-- Migrations against production only when the user explicitly asks in that message.
+- Production credentials are never available locally, by design. Do not look for them.
+- Never search the filesystem outside this repo for secrets or env files.
+- Production migrations run only as part of the Vercel deploy build. Do not apply them from a local shell.

@@ -51,7 +51,6 @@ export async function POST(request: Request) {
       field: field.id,
       value,
       path: "form",
-      countSweep: false,
     });
     if (!result.ok) {
       if (result.reason === "terminal" || result.reason === "expired") {

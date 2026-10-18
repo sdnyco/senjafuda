@@ -1,10 +1,15 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { answers, tokens, type Token } from "@/db/schema";
-import { noteOptionHit } from "./rate-limit";
+import { noteSweepHit } from "./rate-limit";
 import { optionPosition } from "./shuffle";
 import { ensureNotExpired, getToken, isTerminal } from "./tokens";
 import { getField, loadVocab, nextFieldId } from "./vocab";
+
+/** How long after completed_at a fast-sweep may set `swept` without changing status. */
+const SWEEP_AFTER_COMPLETE_MS = 10_000;
+
+export type SweepMark = "none" | "branched" | "swept";
 
 export type WritePath = "link" | "form";
 
@@ -17,8 +22,6 @@ export async function writeAnswer(opts: {
   field: string;
   value: string;
   path: WritePath;
-  /** Count toward fast-sweep (option links only). */
-  countSweep?: boolean;
 }): Promise<WriteResult> {
   const vocab = loadVocab();
   const fieldDef = getField(opts.field, vocab);
@@ -110,24 +113,19 @@ export async function writeAnswer(opts: {
     return { ok: true, token, nextFieldId: next, signed: false };
   });
 
-  if (result.ok && opts.countSweep && opts.value !== vocab.skip_value) {
-    const swept = await noteOptionHit(opts.tokenId);
-    if (swept) {
-      const branched = await markBranched(opts.tokenId);
-      if (branched) {
-        return {
-          ok: true,
-          token: branched,
-          nextFieldId: null,
-          signed: false,
-        };
-      }
-    }
-  }
   return result;
 }
 
-async function markBranched(tokenId: string): Promise<Token | null> {
+/**
+ * Count a sweep GET and apply the threshold.
+ * Still issued/partial → status becomes `branched`.
+ * Already signed/declined, and the threshold lands within 10s of completed_at
+ * → `swept = true` and status stays as stored.
+ */
+export async function recordSweepGet(tokenId: string): Promise<SweepMark> {
+  const tripped = await noteSweepHit(tokenId);
+  if (!tripped) return "none";
+
   const db = getDb();
   return db.transaction(async (tx) => {
     const locked = await tx
@@ -137,13 +135,31 @@ async function markBranched(tokenId: string): Promise<Token | null> {
       .for("update")
       .limit(1);
     const token = locked[0];
-    if (!token || isTerminal(token.status)) return token ?? null;
-    const completedAt = new Date();
-    await tx
-      .update(tokens)
-      .set({ status: "branched", completedAt })
-      .where(eq(tokens.id, tokenId));
-    return { ...token, status: "branched", completedAt };
+    if (!token) return "none";
+
+    if (!isTerminal(token.status)) {
+      const completedAt = new Date();
+      await tx
+        .update(tokens)
+        .set({ status: "branched", completedAt })
+        .where(eq(tokens.id, tokenId));
+      return "branched";
+    }
+
+    if (
+      (token.status === "signed" || token.status === "declined") &&
+      token.completedAt &&
+      Date.now() - token.completedAt.getTime() <= SWEEP_AFTER_COMPLETE_MS &&
+      !token.swept
+    ) {
+      await tx
+        .update(tokens)
+        .set({ swept: true })
+        .where(eq(tokens.id, tokenId));
+      return "swept";
+    }
+
+    return "none";
   });
 }
 

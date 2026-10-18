@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { commitSigned } from "@/lib/answers";
+import { commitSigned, recordSweepGet } from "@/lib/answers";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { markRateLimited } from "@/lib/tokens";
 
@@ -19,10 +19,12 @@ export async function GET(request: Request, ctx: Ctx) {
   const commitLimit = await checkRateLimit("commit");
   if (!commitLimit.success) {
     await markRateLimited(token).catch(() => undefined);
+    await recordSweepGet(token);
     return redirect(new URL("/rate-limited", request.url).toString());
   }
 
   const result = await commitSigned(token);
+  await recordSweepGet(token);
   if (!result.ok && result.reason === "not_found") {
     return redirect(new URL("/", request.url).toString());
   }

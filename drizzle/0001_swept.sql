@@ -1,0 +1,1 @@
+ALTER TABLE "tokens" ADD COLUMN IF NOT EXISTS "swept" boolean DEFAULT false NOT NULL;

@@ -57,16 +57,22 @@ export async function checkRateLimit(kind: LimitKind): Promise<RateLimitResult> 
   return { success: result.success, bypassed: false };
 }
 
-/** Fast-sweep: count option-answer hits in a 2s window. Returns true if branched. */
-export async function noteOptionHit(tokenId: string): Promise<boolean> {
+const SWEEP_WINDOW_MS = 2000;
+const SWEEP_THRESHOLD = 3;
+
+/**
+ * Count one sweep GET for a token in a sliding 2s window.
+ * Returns true when this hit reaches the threshold (3+).
+ * Callers decide which GETs count; this does not look at token status.
+ */
+export async function noteSweepHit(tokenId: string): Promise<boolean> {
   const r = getRedis();
   if (!r) return false;
   const key = `senjafuda:sweep:${tokenId}`;
   const now = Date.now();
-  const windowMs = 2000;
   await r.zadd(key, { score: now, member: `${now}:${Math.random()}` });
-  await r.zremrangebyscore(key, 0, now - windowMs);
+  await r.zremrangebyscore(key, 0, now - SWEEP_WINDOW_MS);
   await r.expire(key, 5);
   const count = await r.zcard(key);
-  return count >= 3;
+  return count >= SWEEP_THRESHOLD;
 }

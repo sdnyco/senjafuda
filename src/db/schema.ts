@@ -18,6 +18,8 @@ export const tokens = pgTable("tokens", {
   status: text("status").notNull(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   rateLimited: boolean("rate_limited").notNull().default(false),
+  /** Fast-sweep after a signed/declined commit. Status is left as stored. */
+  swept: boolean("swept").notNull().default(false),
 });
 
 export const answers = pgTable(

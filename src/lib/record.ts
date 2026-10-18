@@ -54,7 +54,13 @@ export async function loadRecordData() {
       })
       .from(answers)
       .innerJoin(tokens, eq(answers.tokenId, tokens.id))
-      .where(and(eq(answers.field, field.id), ne(tokens.status, "branched")))
+      .where(
+        and(
+          eq(answers.field, field.id),
+          ne(tokens.status, "branched"),
+          eq(tokens.swept, false),
+        ),
+      )
       .groupBy(answers.value)
       .orderBy(sql`count(*) desc`);
 
@@ -66,7 +72,13 @@ export async function loadRecordData() {
       })
       .from(answers)
       .innerJoin(tokens, eq(answers.tokenId, tokens.id))
-      .where(and(eq(answers.field, field.id), ne(tokens.status, "branched")))
+      .where(
+        and(
+          eq(answers.field, field.id),
+          ne(tokens.status, "branched"),
+          eq(tokens.swept, false),
+        ),
+      )
       .groupBy(sql`date_trunc('month', ${answers.answeredAt})`, answers.value)
       .orderBy(sql`date_trunc('month', ${answers.answeredAt})`);
 
@@ -85,6 +97,7 @@ export async function loadRecordData() {
       and(
         eq(answers.field, "mark"),
         eq(tokens.status, "signed"),
+        eq(tokens.swept, false),
         ne(answers.value, vocab.skip_value),
       ),
     )

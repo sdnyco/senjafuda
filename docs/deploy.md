@@ -3,7 +3,7 @@
 ## Services
 
 1. **Vercel** — import this repo, framework Next.js. Enable Corepack / use the repo `packageManager` field so builds run with **pnpm**.
-2. **Neon** — create a project (Vercel Marketplace is fine). Apply `drizzle/0000_init.sql` (or `pnpm db:migrate`).
+2. **Neon** — create a project (Vercel Marketplace is fine). Schema is applied by the Vercel build (below), not from a laptop.
 3. **Upstash Redis** — new Redis database; copy REST URL + token. **Required in Production** (build fails closed without them).
 
 ## Environment variables (Vercel)
@@ -31,6 +31,20 @@ Configure one of:
 Optionally set `PRODUCTION_DATABASE_URL` on Preview to the production connection string. If `DATABASE_URL` equals that value outside production, prebuild and runtime refuse to run.
 
 Production builds (`VERCEL_ENV=production`) exit non-zero when any of `DATABASE_URL`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `IP_HASH_PEPPER`, or `SITE_ORIGIN` is missing, so Vercel does not promote a misconfigured deploy. Runtime throws under the same condition.
+
+## Migrations
+
+`vercel.json` sets the build command to `pnpm run build`. That runs, in order:
+
+1. `scripts/check-prod-config.mjs` (`prebuild`)
+2. `scripts/migrate-on-build.mjs`
+3. `next build`
+
+The migration step connects with `DATABASE_URL_UNPOOLED`, or `DATABASE_URL` if the unpooled URL is unset. Production migrates the main branch. Each Preview deployment migrates that preview’s own Neon branch. When neither URL is set (a local `pnpm build`), the step logs a skip and exits 0. Any migration error exits non-zero and fails the build, so the deployment is not promoted.
+
+Migrations are **additive only**: new tables, or new columns with defaults. Do not `DROP`, and do not rewrite or delete existing rows. Every file in `/drizzle` is applied again on each build, so each file must be safe to re-run (`IF NOT EXISTS`).
+
+Production database credentials are not available on local machines. Do not apply production migrations from a shell. `pnpm db:migrate` is for a local or dev branch whose URL is already in the environment.
 
 ## Read-only role (Neon)
 

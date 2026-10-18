@@ -23,6 +23,7 @@ export async function issueToken(uaHeader: string | null): Promise<Token> {
     status: "issued" as TokenStatus,
     completedAt: null,
     rateLimited: false,
+    swept: false,
   };
   await db.insert(tokens).values(row);
   return row;

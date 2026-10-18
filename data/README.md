@@ -21,7 +21,9 @@ Exports run nightly (03:00 UTC) via GitHub Actions using a **read-only** databas
 
 - `exported_at` is the instant the dump was taken.
 - `status` is the **stored** value in the database (unchanged by export).
-- `effective_status` is derived at export time (same rules as `/record` aggregates):
+- `effective_status` is derived at export time (same rules as `/record` aggregates), in this order:
+  - `branched` when `status = 'branched'` (wins even if `swept` is true)
+  - `swept` when `swept` is true
   - `expired` when `status IN ('issued', 'partial')` **and** `expires_at <= exported_at`
   - otherwise equal to `status`
 
@@ -35,10 +37,13 @@ The live app may still **lazily** rewrite a row to `expired` when that token is 
 | `partial` | At least one answer or skip row; not yet committed |
 | `signed` | Committed entry (may be empty) |
 | `declined` | Explicit decline (optional `decline_reason` answer) |
-| `branched` | Conflicting answers or fast-sweep; **kept in raw data**, exclude from clean distributions |
+| `branched` | Conflicting answers, or a fast-sweep while the token was still `issued` / `partial`. **Kept in raw data**; exclude from clean distributions |
 | `expired` | Timed out while `issued` or `partial` (stored after lazy access, or only as `effective_status` until then) |
+| `swept` | Not a stored status. `effective_status` is `swept` when the `swept` column is true and status is not `branched` |
 
-Also: `rate_limited` (boolean on the token) means this token hit an answer/commit rate limit at least once. Rate-limited signed entries **remain** in distributions; branched tokens do not.
+`swept` (boolean on the token) means 3 or more GETs under `/s/{token}/` landed within 2 seconds, and that threshold was reached within 10 seconds after the token was already `signed` or `declined`. Status is not rewritten. Swept tokens stay in the raw export and are excluded from `/record` distributions and the mosaic, the same way `branched` tokens are.
+
+`rate_limited` (boolean on the token) means this token hit an answer/commit rate limit at least once. Rate-limited signed entries **remain** in distributions; branched and swept tokens do not.
 
 ## Answers
 
@@ -48,7 +53,18 @@ Also: `rate_limited` (boolean on the token) means this token hit an answer/commi
 - `path` is `link` or `form`.
 - Decline reasons use `field = "decline_reason"`.
 
-For clean field distributions, filter `tokens.status NOT IN ('branched')` (and usually join only `signed` / `partial` / `declined` as needed). When using dumps, you may prefer `effective_status` over `status` for issued/partial/expired splits.
+For clean field distributions, filter `effective_status NOT IN ('branched', 'swept')` (equivalently `status <> 'branched' AND swept = false`), and usually join only `signed` / `partial` / `declined` as needed. When using dumps, prefer `effective_status` over `status` for issued/partial/expired/swept splits.
+
+### Finish and decline were not sweep-protected before 2026-10-18
+
+Fast-sweep originally counted only option-answer GETs. Skip (`_skipped`), finish, the decline page, and decline-reason links were ignored, and any hit after a token was already `signed` or `declined` was ignored too. A crawler that followed those links could leave a normal-looking committed row.
+
+Two tokens in this export fit that pattern and are left as stored (rows are not edited):
+
+- `VYOFKUAX4XVLBKYTN2III6L2TA` — `signed` with no answer rows. That is what following the finish link does.
+- `4ONSLGKNZ33E4K2BGX7YEJ2FUU` — `declined`, with one `decline_reason` answer (`not_authorized_by_principal`). That is what following the decline page into a reason link does.
+
+From 2026-10-18, those same bursts are labelled `swept = true` without changing `status`. These two rows predate that label, so `swept` is false on them. Treat them as likely crawler-generated when you read the early dump.
 
 ## User-agent fields
 

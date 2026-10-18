@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { commitSigned, writeAnswer } from "@/lib/answers";
+import { commitSigned, recordSweepGet, writeAnswer } from "@/lib/answers";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { markRateLimited } from "@/lib/tokens";
 import { getField, loadVocab, nextFieldId } from "@/lib/vocab";
@@ -29,13 +29,18 @@ function noStoreHtml(html: string, status = 200) {
 export async function GET(request: Request, ctx: Ctx) {
   const { token, step, optionId } = await ctx.params;
   const vocab = loadVocab();
+  const thanks = () =>
+    noStoreRedirect(new URL(`/s/${token}/thanks`, request.url).toString());
+
   if (!getField(step, vocab)) {
+    await recordSweepGet(token);
     return noStoreHtml("<h1>Unknown question</h1>", 404);
   }
 
   const answerLimit = await checkRateLimit("answer");
   if (!answerLimit.success) {
     await markRateLimited(token).catch(() => undefined);
+    await recordSweepGet(token);
     return noStoreRedirect(new URL("/rate-limited", request.url).toString(), 429);
   }
 
@@ -44,41 +49,41 @@ export async function GET(request: Request, ctx: Ctx) {
     const commitLimit = await checkRateLimit("commit");
     if (!commitLimit.success) {
       await markRateLimited(token).catch(() => undefined);
+      await recordSweepGet(token);
       return noStoreRedirect(new URL("/rate-limited", request.url).toString(), 429);
     }
   }
 
-  const countSweep = optionId !== vocab.skip_value;
   const result = await writeAnswer({
     tokenId: token,
     field: step,
     value: optionId,
     path: "link",
-    countSweep,
   });
 
   if (!result.ok) {
+    await recordSweepGet(token);
     if (result.reason === "not_found") {
       return noStoreRedirect(new URL("/", request.url).toString());
     }
     if (result.reason === "expired" || result.reason === "terminal") {
-      return noStoreRedirect(new URL(`/s/${token}/thanks`, request.url).toString());
+      return thanks();
     }
     return noStoreHtml("<h1>Invalid option</h1>", 400);
   }
 
-  if (result.token.status === "branched") {
-    return noStoreRedirect(new URL(`/s/${token}/thanks`, request.url).toString());
+  if (result.token.status !== "branched" && !result.nextFieldId) {
+    await commitSigned(token);
   }
 
-  if (result.nextFieldId) {
-    return noStoreRedirect(
-      new URL(`/s/${token}/${result.nextFieldId}`, request.url).toString(),
-    );
+  const sweep = await recordSweepGet(token);
+  if (result.token.status === "branched" || sweep === "branched" || !result.nextFieldId) {
+    return thanks();
   }
 
-  await commitSigned(token);
-  return noStoreRedirect(new URL(`/s/${token}/thanks`, request.url).toString());
+  return noStoreRedirect(
+    new URL(`/s/${token}/${result.nextFieldId}`, request.url).toString(),
+  );
 }
 
 export function HEAD() {

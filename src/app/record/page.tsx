@@ -13,6 +13,7 @@ const STATUS_ORDER = [
   "signed",
   "declined",
   "branched",
+  "swept",
   "expired",
 ] as const;
 
@@ -58,7 +59,7 @@ export default async function RecordPage() {
       <p className="note">
         Last updated {data.updatedAt.toISOString()} (page revalidates about every
         five minutes). Field distributions and the mosaic exclude branched
-        tokens. Rate-limited tokens remain included where they signed.
+        and swept tokens. Rate-limited tokens remain included where they signed.
       </p>
 
       <h2>Totals</h2>
@@ -81,7 +82,9 @@ export default async function RecordPage() {
                   <code>{status}</code>
                   {status === "issued"
                     ? " — looked, did nothing; includes crawlers"
-                    : ""}
+                    : status === "swept"
+                      ? " — fast-sweep after signed or declined; excluded like branched"
+                      : ""}
                 </td>
                 <td>{data.byStatus[status] ?? 0}</td>
               </tr>

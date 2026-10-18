@@ -138,6 +138,7 @@ async function main() {
           ? now
           : null,
         rateLimited: row.rateLimited,
+        swept: false,
       })
       .onConflictDoNothing();
   }

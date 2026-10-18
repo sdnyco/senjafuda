@@ -54,9 +54,15 @@ async function main() {
         ua_class: r.uaClass,
         ua_family: r.uaFamily,
         status: r.status,
-        effective_status: effectiveStatus(r.status, r.expiresAt, exportedAt),
+        effective_status: effectiveStatus(
+          r.status,
+          r.expiresAt,
+          exportedAt,
+          r.swept,
+        ),
         completed_at: r.completedAt ? r.completedAt.toISOString() : null,
         rate_limited: r.rateLimited,
+        swept: r.swept,
       }),
     )
     .join("\n");
@@ -84,7 +90,7 @@ async function main() {
   );
 
   const tokenCsvHeader =
-    "id,issued_at,expires_at,vocab_version,ua_rules_version,ua_class,ua_family,status,effective_status,completed_at,rate_limited\n";
+    "id,issued_at,expires_at,vocab_version,ua_rules_version,ua_class,ua_family,status,effective_status,completed_at,rate_limited,swept\n";
   const tokenCsv = tokenRows
     .map((r) =>
       [
@@ -96,9 +102,10 @@ async function main() {
         r.uaClass,
         r.uaFamily,
         r.status,
-        effectiveStatus(r.status, r.expiresAt, exportedAt),
+        effectiveStatus(r.status, r.expiresAt, exportedAt, r.swept),
         r.completedAt ? r.completedAt.toISOString() : "",
         r.rateLimited,
+        r.swept,
       ]
         .map(csvEscape)
         .join(","),

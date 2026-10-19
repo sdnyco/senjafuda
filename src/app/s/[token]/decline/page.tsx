@@ -38,12 +38,16 @@ export default async function DeclinePage({ params }: Props) {
       <ul className="option-list">
         {vocab.decline_reasons.map((r) => (
           <li key={r.id}>
-            <a href={`/s/${tokenId}/decline/${r.id}`}>{r.label}</a>
+            <a href={`/s/${tokenId}/decline/${r.id}`} rel="nofollow">
+              {r.label}
+            </a>
           </li>
         ))}
       </ul>
       <nav className="meta-nav">
-        <a href={`/s/${tokenId}/finish`}>Sign with no further answers instead</a>
+        <a href={`/s/${tokenId}/finish`} rel="nofollow">
+          Sign with no further answers instead
+        </a>
         <a href="/">Leave without declining</a>
       </nav>
     </Shell>

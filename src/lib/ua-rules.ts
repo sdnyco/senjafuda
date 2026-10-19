@@ -112,3 +112,23 @@ export function classifyUserAgent(uaHeader: string | null): {
     uaRulesVersion: UA_RULES_VERSION,
   };
 }
+
+/**
+ * Product tokens for robots.txt Allow groups (user-initiated agent fetchers).
+ * Derived from every `ai_user_fetch` rule. Patterns for that class must be
+ * literal product names (e.g. `Claude-User`) so robots.txt cannot drift.
+ */
+export function aiUserFetchRobotsUserAgents(): string[] {
+  const agents: string[] = [];
+  for (const rule of RULES) {
+    if (rule.uaClass !== "ai_user_fetch") continue;
+    const name = rule.pattern.source;
+    if (!/^[A-Za-z0-9._-]+$/.test(name)) {
+      throw new Error(
+        `ai_user_fetch robots User-agent must be a literal product token, got ${JSON.stringify(name)}`,
+      );
+    }
+    agents.push(name);
+  }
+  return agents;
+}

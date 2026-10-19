@@ -46,9 +46,15 @@ export default async function HomePage() {
       <nav className="actions" aria-label="Primary">
         {tokenId ? (
           <>
-            <a href={`/s/${tokenId}/${first}`}>→ Leave an entry</a>
-            <a href={`/sign?t=${tokenId}`}>→ Leave an entry (form)</a>
-            <a href={`/s/${tokenId}/decline`}>→ Not signing — say why (optional)</a>
+            <a href={`/s/${tokenId}/${first}`} rel="nofollow">
+              → Leave an entry
+            </a>
+            <a href={`/sign?t=${tokenId}`} rel="nofollow">
+              → Leave an entry (form)
+            </a>
+            <a href={`/s/${tokenId}/decline`} rel="nofollow">
+              → Not signing — say why (optional)
+            </a>
           </>
         ) : (
           <p className="note">

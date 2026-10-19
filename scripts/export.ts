@@ -1,7 +1,9 @@
 /**
  * Nightly export: dump tokens + answers to /data and copy vocab.
  * Read-only — never UPDATE. Usage:
- *   DATABASE_URL_READONLY=... pnpm exec tsx scripts/export.ts
+ *   DATABASE_URL_READONLY=... EXPORT_ID_SALT=... pnpm exec tsx scripts/export.ts
+ *
+ * Public files use `public_id` only — never the raw token id.
  */
 import "dotenv/config";
 import { createHash } from "crypto";
@@ -18,6 +20,7 @@ import { drizzle } from "drizzle-orm/neon-serverless";
 import ws from "ws";
 import { answers, tokens } from "../src/db/schema";
 import { effectiveStatus } from "../src/lib/effective-status";
+import { publicId } from "../src/lib/public-id";
 
 neonConfig.webSocketConstructor = ws;
 
@@ -31,6 +34,9 @@ function csvEscape(value: unknown): string {
 async function main() {
   const url = process.env.DATABASE_URL_READONLY || process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL_READONLY (or DATABASE_URL) is required");
+
+  const salt = process.env.EXPORT_ID_SALT;
+  if (!salt) throw new Error("EXPORT_ID_SALT is required (never rotate once published)");
 
   const exportedAt = new Date();
   const pool = new Pool({ connectionString: url });
@@ -46,7 +52,7 @@ async function main() {
   const tokensJsonl = tokenRows
     .map((r) =>
       JSON.stringify({
-        id: r.id,
+        public_id: publicId(r.id, salt),
         issued_at: r.issuedAt.toISOString(),
         expires_at: r.expiresAt.toISOString(),
         vocab_version: r.vocabVersion,
@@ -70,7 +76,7 @@ async function main() {
   const answersJsonl = answerRows
     .map((r) =>
       JSON.stringify({
-        token_id: r.tokenId,
+        public_id: publicId(r.tokenId, salt),
         field: r.field,
         value: r.value,
         answered_at: r.answeredAt.toISOString(),
@@ -90,11 +96,11 @@ async function main() {
   );
 
   const tokenCsvHeader =
-    "id,issued_at,expires_at,vocab_version,ua_rules_version,ua_class,ua_family,status,effective_status,completed_at,rate_limited,swept\n";
+    "public_id,issued_at,expires_at,vocab_version,ua_rules_version,ua_class,ua_family,status,effective_status,completed_at,rate_limited,swept\n";
   const tokenCsv = tokenRows
     .map((r) =>
       [
-        r.id,
+        publicId(r.id, salt),
         r.issuedAt.toISOString(),
         r.expiresAt.toISOString(),
         r.vocabVersion,
@@ -116,11 +122,11 @@ async function main() {
     tokenCsvHeader + tokenCsv + (tokenCsv ? "\n" : ""),
   );
 
-  const answerCsvHeader = "token_id,field,value,answered_at,path,position\n";
+  const answerCsvHeader = "public_id,field,value,answered_at,path,position\n";
   const answerCsv = answerRows
     .map((r) =>
       [
-        r.tokenId,
+        publicId(r.tokenId, salt),
         r.field,
         r.value,
         r.answeredAt.toISOString(),
@@ -161,7 +167,7 @@ async function main() {
 
   await pool.end();
   console.log(
-    `Exported ${tokenRows.length} tokens, ${answerRows.length} answers at ${exportedAt.toISOString()} (read-only).`,
+    `Exported ${tokenRows.length} tokens, ${answerRows.length} answers at ${exportedAt.toISOString()} (read-only, public_id).`,
   );
 }
 

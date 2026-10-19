@@ -40,7 +40,7 @@ export default async function QuestionPage({ params }: Props) {
       <ul className="option-list">
         {options.map((opt) => (
           <li key={opt.id}>
-            <a href={`/s/${tokenId}/${field.id}/${opt.id}`}>
+            <a href={`/s/${tokenId}/${field.id}/${opt.id}`} rel="nofollow">
               {field.id === "mark" ? (
                 <span
                   dangerouslySetInnerHTML={{
@@ -54,12 +54,21 @@ export default async function QuestionPage({ params }: Props) {
         ))}
       </ul>
       <nav className="meta-nav">
-        <a href={`/s/${tokenId}/${field.id}/${vocab.skip_value}`}>
+        <a
+          href={`/s/${tokenId}/${field.id}/${vocab.skip_value}`}
+          rel="nofollow"
+        >
           Skip this question
         </a>
-        <a href={`/s/${tokenId}/finish`}>Finish now</a>
-        <a href={`/s/${tokenId}/decline`}>Not signing — say why</a>
-        <a href={`/sign?t=${tokenId}`}>Use the form instead</a>
+        <a href={`/s/${tokenId}/finish`} rel="nofollow">
+          Finish now
+        </a>
+        <a href={`/s/${tokenId}/decline`} rel="nofollow">
+          Not signing — say why
+        </a>
+        <a href={`/sign?t=${tokenId}`} rel="nofollow">
+          Use the form instead
+        </a>
       </nav>
     </Shell>
   );

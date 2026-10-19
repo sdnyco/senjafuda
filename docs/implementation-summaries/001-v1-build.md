@@ -138,3 +138,13 @@ Fast-sweep only counted option-answer GETs, and ignored hits after a token was a
 ### Preview verification
 
 Branch `sweep-label` Preview build applied `0000_init.sql` and `0001_swept.sql`. Smoke via `vercel curl` (`scripts/preview-sweep-smoke.mjs`): finish + option hits → swept; decline + reason hits → swept; slow sign → not forced onto the sweep path.
+
+## Follow-up (2026-10-19): robots allow user-fetch agents + export `public_id`
+
+### robots.txt
+
+`Claude-User` (and other `ai_user_fetch` product tokens) honour robots.txt and were blocked from `/s/` and `/sign`, while scanners that ignore robots walked in. `/robots.txt` is now generated from `aiUserFetchRobotsUserAgents()` in `ua-rules.ts`: each of those UAs gets `Allow: /`; `User-agent: *` still disallows `/s/` and `/sign`. Sign, finish and decline links get `rel="nofollow"`; `/s/` and `/sign` keep `X-Robots-Tag: noindex`. One sentence added to `/llms.txt`: agents sent by a person may follow the sign links. Documented in `data/README.md` (no agent entries before this date reflect the robots block).
+
+### Export identifiers
+
+Public dumps no longer include raw token ids (usable for 24 h). Export emits `public_id` = first 16 hex chars of `sha256(token_id + EXPORT_ID_SALT)` in both tokens and answers files. `EXPORT_ID_SALT` is a GitHub Actions secret (generate once; never rotate). `/record` mosaic no longer selects raw token ids. Existing `/data` dump files were scrubbed to `public_id` with the same salt. Documented in `data/README.md` and `docs/deploy.md`.

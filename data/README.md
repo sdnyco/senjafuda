@@ -10,12 +10,20 @@ This folder is the public, append-only export of **senjafuda**, a visitors' book
 
 | File | Contents |
 |---|---|
-| `tokens.jsonl` / `tokens.csv` | One row per visit token |
-| `answers.jsonl` / `answers.csv` | Long-format answers (`token_id`, `field`, `value`, …) |
+| `tokens.jsonl` / `tokens.csv` | One row per visit token (`public_id`, never the raw token id) |
+| `answers.jsonl` / `answers.csv` | Long-format answers (`public_id`, `field`, `value`, …) |
 | `vocab/*.json` | Vocabulary snapshots referenced by `vocab_version` |
 | `exported_at` | ISO-8601 UTC timestamp of the export run (`now()` used for `effective_status`) |
 
 Exports run nightly (03:00 UTC) via GitHub Actions using a **read-only** database role. The job never writes to Postgres.
+
+## Identifiers (`public_id`)
+
+Join key across `tokens.*` and `answers.*` is `public_id`: the first 16 hex characters of `sha256(token_id + EXPORT_ID_SALT)`. The raw token id stays in the database only and is never exported. The salt is fixed; rotating it would break continuity of published ids.
+
+### Exports before 2026-10-19 used raw token ids
+
+Dumps committed before this date included the live token id in `id` / `token_id`. Those ids were usable while the token was still within its 24-hour window. Tokens from dumps before this date have all expired. Treat early files as historical only; from 2026-10-19 onward the column is `public_id`.
 
 ## Export timestamp and `effective_status`
 
@@ -47,7 +55,7 @@ The live app may still **lazily** rewrite a row to `expired` when that token is 
 
 ## Answers
 
-- Primary key: `(token_id, field, value)` — branched tokens may have multiple values per field.
+- Join to tokens on `public_id`. Branched tokens may have multiple values per field.
 - `value = "_skipped"` means the visitor chose skip for that field (distinct from never reaching it).
 - `position` is the 0-based display index of the chosen option for that token (null for skips). Options are shuffled per token; meta options stay pinned at the end.
 - `path` is `link` or `form`.
@@ -59,12 +67,16 @@ For clean field distributions, filter `effective_status NOT IN ('branched', 'swe
 
 Fast-sweep originally counted only option-answer GETs. Skip (`_skipped`), finish, the decline page, and decline-reason links were ignored, and any hit after a token was already `signed` or `declined` was ignored too. A crawler that followed those links could leave a normal-looking committed row.
 
-Two tokens in this export fit that pattern and are left as stored (rows are not edited):
+Two tokens in the **first** export (raw ids, before `public_id`) fit that pattern and are left as stored (rows are not edited):
 
 - `VYOFKUAX4XVLBKYTN2III6L2TA` — `signed` with no answer rows. That is what following the finish link does.
 - `4ONSLGKNZ33E4K2BGX7YEJ2FUU` — `declined`, with one `decline_reason` answer (`not_authorized_by_principal`). That is what following the decline page into a reason link does.
 
-From 2026-10-18, those same bursts are labelled `swept = true` without changing `status`. These two rows predate that label, so `swept` is false on them. Treat them as likely crawler-generated when you read the early dump.
+From 2026-10-18, those same bursts are labelled `swept = true` without changing `status`. Those two rows predate that label. Treat them as likely crawler-generated when you read the early dump.
+
+## robots.txt and agent signing (before 2026-10-19)
+
+Until 2026-10-19, `robots.txt` disallowed `/s/` and `/sign` for every user-agent, including user-initiated agent fetchers (`Claude-User`, `ChatGPT-User`, `Perplexity-User`, …). Agents that honour robots.txt could not complete the link flow. The absence of agent entries before this date reflects that block, not agent behaviour. From this date, those `ai_user_fetch` product tokens get `Allow: /` while `User-agent: *` still disallows `/s/` and `/sign`. Sign, finish and decline links also carry `rel="nofollow"`; `/s/` and `/sign` keep `X-Robots-Tag: noindex`.
 
 ## User-agent fields
 

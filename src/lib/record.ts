@@ -85,9 +85,9 @@ export async function loadRecordData() {
     distributions.push({ field: field.id, allTime, byMonth });
   }
 
+  // Do not select or expose raw token ids — public surfaces use aggregates only.
   const mosaic = await db
     .select({
-      tokenId: answers.tokenId,
       value: answers.value,
       answeredAt: answers.answeredAt,
     })
@@ -101,7 +101,7 @@ export async function loadRecordData() {
         ne(answers.value, vocab.skip_value),
       ),
     )
-    .orderBy(asc(answers.answeredAt), asc(answers.tokenId));
+    .orderBy(asc(answers.answeredAt), asc(tokens.id));
 
   return {
     issued,

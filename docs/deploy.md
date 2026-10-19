@@ -65,6 +65,7 @@ Build a connection string for that role and store it as the GitHub Actions secre
 | Secret | Purpose |
 |---|---|
 | `DATABASE_URL_READONLY` | Nightly export |
+| `EXPORT_ID_SALT` | Fixed salt for `public_id` in the export (`sha256(token_id + salt)`, first 16 hex chars). Generate once; **never rotate** or published ids lose continuity |
 | `SITE_ORIGIN` | Public origin for Internet Archive saves: `https://senjafuda.org` |
 
 The export workflow needs `contents: write` to commit under `/data`.

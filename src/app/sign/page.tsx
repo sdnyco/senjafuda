@@ -68,8 +68,12 @@ export default async function SignFormPage({ searchParams }: Props) {
         </button>
       </form>
       <nav className="meta-nav">
-        <a href={`/s/${tokenId}/decline`}>Not signing — say why (optional)</a>
-        <a href={`/s/${tokenId}/${fields[0]?.id}`}>Use the link flow instead</a>
+        <a href={`/s/${tokenId}/decline`} rel="nofollow">
+          Not signing — say why (optional)
+        </a>
+        <a href={`/s/${tokenId}/${fields[0]?.id}`} rel="nofollow">
+          Use the link flow instead
+        </a>
       </nav>
     </Shell>
   );

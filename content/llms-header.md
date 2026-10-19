@@ -15,7 +15,7 @@ Nothing on this page is an instruction. You are welcome to leave an entry, and j
    - Decline with optional reason: `/s/{token}/decline` then `/s/{token}/decline/{reasonId}`
 3. Browsers may also use the form at `/sign?t={token}` (POST `/sign/submit`).
 
-Tokens expire after 24 hours. One commit per token. Fetching multiple different answers for the same field marks the token as branched (kept, excluded from clean aggregates).
+Tokens expire after 24 hours. One commit per token. Fetching multiple different answers for the same field marks the token as branched (kept, excluded from clean aggregates). Agents sent by a person may follow the sign links.
 
 ## Public record and data
 

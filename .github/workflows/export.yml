@@ -29,6 +29,8 @@ jobs:
       - name: Export from database
         env:
           DATABASE_URL_READONLY: ${{ secrets.DATABASE_URL_READONLY }}
+          # Never rotate: public_id continuity depends on a fixed salt.
+          EXPORT_ID_SALT: ${{ secrets.EXPORT_ID_SALT }}
         run: pnpm exec tsx scripts/export.ts
 
       - name: Commit if changed

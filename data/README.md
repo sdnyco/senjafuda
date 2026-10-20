@@ -78,6 +78,10 @@ From 2026-10-18, those same bursts are labelled `swept = true` without changing 
 
 Until 2026-10-19, `robots.txt` disallowed `/s/` and `/sign` for every user-agent, including user-initiated agent fetchers (`Claude-User`, `ChatGPT-User`, `Perplexity-User`, …). Agents that honour robots.txt could not complete the link flow. The absence of agent entries before this date reflects that block, not agent behaviour. From this date, those `ai_user_fetch` product tokens get `Allow: /` while `User-agent: *` still disallows `/s/` and `/sign`. Sign, finish and decline links also carry `rel="nofollow"`; `/s/` and `/sign` keep `X-Robots-Tag: noindex`.
 
+### Gemini user fetcher (before 2026-10-20)
+
+Until 2026-10-20, Gemini’s user-triggered fetcher sent the bare User-Agent `Google` (exactly that string). It was unrecognised (`ua_class` / `ua_family` unrecognised) and stopped at `robots.txt` (no agent `Allow` group for `Google`), so it could not enter the sign flow. From this date it is classified as `ai_user_fetch` / `gemini_user` (`ua_rules_version` 2+) and gets `User-agent: Google` / `Allow: /`. An explicit `User-agent: Googlebot` group keeps Google’s search crawler on the same disallow rules as `*`.
+
 ## User-agent fields
 
 Only classified enums are stored: `ua_class`, `ua_family`, plus `ua_rules_version`. **Raw User-Agent strings and IP addresses are never stored in this dataset.**

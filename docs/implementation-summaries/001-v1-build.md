@@ -148,3 +148,13 @@ Branch `sweep-label` Preview build applied `0000_init.sql` and `0001_swept.sql`.
 ### Export identifiers
 
 Public dumps no longer include raw token ids (usable for 24 h). Export emits `public_id` = first 16 hex chars of `sha256(token_id + EXPORT_ID_SALT)` in both tokens and answers files. `EXPORT_ID_SALT` is a GitHub Actions secret (generate once; never rotate). `/record` mosaic no longer selects raw token ids. Existing `/data` dump files were scrubbed to `public_id` with the same salt. Documented in `data/README.md` and `docs/deploy.md`.
+
+## Follow-up (2026-10-20): Gemini bare UA `Google`
+
+Gemini’s user-triggered fetcher sends User-Agent exactly `Google` (trimmed, case-sensitive). It was unrecognised and stopped at robots.txt before the sign flow.
+
+- `ua-rules.ts`: `ua_rules_version` → 2; new family `gemini_user`; exact-match rule for `"Google"` → `ai_user_fetch` / `gemini_user` (not a substring, so `Googlebot` / `Google-Extended` stay on their own rules).
+- `/robots.txt`: `User-agent: Google` / `Allow: /` via `aiUserFetchRobotsUserAgents()`; explicit `User-agent: Googlebot` group with the same path rules as `*` so search crawl does not inherit the agent allowance (robots matching can treat `Google` as a prefix of `Googlebot`).
+- `data/README.md`: dated note that pre-2026-10-20 Gemini fetches were blocked at robots / unclassified.
+
+Verified on Preview: `GET /robots.txt` includes `User-agent: Google` / `Allow: /`, a `User-agent: Googlebot` disallow group matching `*`, and the other `ai_user_fetch` tokens.

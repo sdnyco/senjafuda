@@ -1,4 +1,4 @@
-export const UA_RULES_VERSION = 1;
+export const UA_RULES_VERSION = 2;
 
 export const UA_CLASSES = [
   "ai_crawler",
@@ -22,6 +22,7 @@ export const UA_FAMILIES = [
   "chatgpt_user",
   "claude_user",
   "perplexity_user",
+  "gemini_user",
   "python_requests",
   "httpx",
   "aiohttp",
@@ -50,11 +51,21 @@ export const UA_FAMILIES = [
 
 export type UaFamily = (typeof UA_FAMILIES)[number];
 
-type Rule = {
-  pattern: RegExp;
-  uaClass: UaClass;
-  uaFamily: UaFamily;
-};
+type Rule =
+  | {
+      /** Substring/regex match against the raw UA header. */
+      pattern: RegExp;
+      exact?: undefined;
+      uaClass: UaClass;
+      uaFamily: UaFamily;
+    }
+  | {
+      /** Trimmed, case-sensitive equality (not a substring match). */
+      exact: string;
+      pattern?: undefined;
+      uaClass: UaClass;
+      uaFamily: UaFamily;
+    };
 
 /** First match wins. Order matters: more specific before generic. */
 const RULES: Rule[] = [
@@ -66,6 +77,8 @@ const RULES: Rule[] = [
   { pattern: /ChatGPT-User/i, uaClass: "ai_user_fetch", uaFamily: "chatgpt_user" },
   { pattern: /Claude-User/i, uaClass: "ai_user_fetch", uaFamily: "claude_user" },
   { pattern: /Perplexity-User/i, uaClass: "ai_user_fetch", uaFamily: "perplexity_user" },
+  // Gemini user-triggered fetcher: bare UA "Google" only (not Googlebot / Google-Extended).
+  { exact: "Google", uaClass: "ai_user_fetch", uaFamily: "gemini_user" },
   { pattern: /python-requests/i, uaClass: "http_library", uaFamily: "python_requests" },
   { pattern: /httpx/i, uaClass: "http_library", uaFamily: "httpx" },
   { pattern: /aiohttp/i, uaClass: "http_library", uaFamily: "aiohttp" },
@@ -91,14 +104,22 @@ const RULES: Rule[] = [
   { pattern: /Safari\//i, uaClass: "browser", uaFamily: "safari" },
 ];
 
+function ruleMatches(rule: Rule, ua: string, trimmed: string): boolean {
+  if (rule.exact !== undefined) {
+    return trimmed === rule.exact;
+  }
+  return rule.pattern.test(ua);
+}
+
 export function classifyUserAgent(uaHeader: string | null): {
   uaClass: UaClass;
   uaFamily: UaFamily;
   uaRulesVersion: number;
 } {
   const ua = uaHeader ?? "";
+  const trimmed = ua.trim();
   for (const rule of RULES) {
-    if (rule.pattern.test(ua)) {
+    if (ruleMatches(rule, ua, trimmed)) {
       return {
         uaClass: rule.uaClass,
         uaFamily: rule.uaFamily,
@@ -117,12 +138,13 @@ export function classifyUserAgent(uaHeader: string | null): {
  * Product tokens for robots.txt Allow groups (user-initiated agent fetchers).
  * Derived from every `ai_user_fetch` rule. Patterns for that class must be
  * literal product names (e.g. `Claude-User`) so robots.txt cannot drift.
+ * Exact-match rules contribute their exact string (e.g. `Google`).
  */
 export function aiUserFetchRobotsUserAgents(): string[] {
   const agents: string[] = [];
   for (const rule of RULES) {
     if (rule.uaClass !== "ai_user_fetch") continue;
-    const name = rule.pattern.source;
+    const name = rule.exact ?? rule.pattern.source;
     if (!/^[A-Za-z0-9._-]+$/.test(name)) {
       throw new Error(
         `ai_user_fetch robots User-agent must be a literal product token, got ${JSON.stringify(name)}`,

@@ -12,7 +12,8 @@
     serif;
   --font-body: "Source Serif 4", "Iowan Old Style", "Palatino Linotype", Palatino,
     serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-mono: "JuliaMono Canvas", ui-monospace, monospace;
+  --font-canvas: "JuliaMono Canvas", ui-monospace, monospace;
 }
 
 html {
@@ -249,4 +250,38 @@ code,
   padding: 0.75rem 1rem;
   margin-bottom: 1.25rem;
   font-size: 0.95rem;
+}
+
+.canvas-block {
+  margin: 1.25rem 0 1.5rem;
+}
+
+.canvas-pre {
+  font-family: var(--font-canvas);
+  font-size: 1.15rem;
+  line-height: 1.05;
+  letter-spacing: 0;
+  margin: 0;
+  padding: 0.75rem 0;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 1;
+  -webkit-overflow-scrolling: touch;
+}
+
+.canvas-legend {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin: 0.35rem 0 0;
+  max-width: none;
+}
+
+.shell-wide {
+  width: min(52rem, calc(100% - 2rem));
+}
+
+.receipt {
+  font-family: var(--font-canvas);
+  font-size: 0.95rem;
+  color: var(--muted);
 }

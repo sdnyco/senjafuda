@@ -12,6 +12,8 @@ const PRODUCTION_REQUIRED = [
   "UPSTASH_REDIS_REST_TOKEN",
   "IP_HASH_PEPPER",
   "SITE_ORIGIN",
+  "LINK_SIGNING_SECRET",
+  "EXPORT_ID_SALT",
 ] as const;
 
 export function isProductionEnv(): boolean {

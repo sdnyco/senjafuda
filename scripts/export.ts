@@ -1,53 +1,64 @@
 /**
- * Nightly export: dump tokens + answers to /data and copy vocab.
- * Read-only — never UPDATE. Usage:
+ * Nightly export (era 1).
  *   DATABASE_URL_READONLY=... EXPORT_ID_SALT=... pnpm exec tsx scripts/export.ts
  *
- * Public files use `public_id` only — never the raw token id.
+ * Optional: PILOT_FINAL=1 also dumps pilot tokens/answers into data/pilot-2026-10/.
+ * Requires DATABASE_URL_READONLY (no fallback to DATABASE_URL).
  */
 import "dotenv/config";
 import { createHash } from "crypto";
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
-  readdirSync,
+  readFileSync,
   writeFileSync,
+  copyFileSync,
+  readdirSync,
 } from "fs";
 import path from "path";
+import { spawnSync } from "child_process";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-serverless";
+import { eq } from "drizzle-orm";
 import ws from "ws";
-import { answers, tokens } from "../src/db/schema";
-import { effectiveStatus } from "../src/lib/effective-status";
+import {
+  answers,
+  canvasState,
+  census,
+  drawings,
+  tokens,
+  visits,
+} from "../src/db/schema";
 import { publicId } from "../src/lib/public-id";
+import { era1EffectiveStatus } from "../src/lib/era1-effective-status";
+import { effectiveStatus } from "../src/lib/effective-status";
+import {
+  renderCanvasText,
+  type CanvasCell,
+} from "../src/lib/canvas";
+import { loadEra1Vocab } from "../src/lib/era1-vocab";
 
 neonConfig.webSocketConstructor = ws;
 
-function csvEscape(value: unknown): string {
-  if (value == null) return "";
-  const s = String(value);
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
+function sha256Hex(s: string): string {
+  return createHash("sha256").update(s, "utf8").digest("hex");
 }
 
-async function main() {
-  const url = process.env.DATABASE_URL_READONLY || process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL_READONLY (or DATABASE_URL) is required");
+function dayStartUtc(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
 
-  const salt = process.env.EXPORT_ID_SALT;
-  if (!salt) throw new Error("EXPORT_ID_SALT is required (never rotate once published)");
-
-  const exportedAt = new Date();
-  const pool = new Pool({ connectionString: url });
-  const db = drizzle(pool);
+async function exportPilotFinal(
+  db: ReturnType<typeof drizzle>,
+  salt: string,
+  exportedAt: Date,
+) {
+  const dir = path.join(process.cwd(), "data", "pilot-2026-10");
+  mkdirSync(dir, { recursive: true });
+  mkdirSync(path.join(dir, "vocab"), { recursive: true });
 
   const tokenRows = await db.select().from(tokens);
   const answerRows = await db.select().from(answers);
-
-  const dataDir = path.join(process.cwd(), "data");
-  mkdirSync(dataDir, { recursive: true });
-  mkdirSync(path.join(dataDir, "vocab"), { recursive: true });
 
   const tokensJsonl = tokenRows
     .map((r) =>
@@ -86,89 +97,237 @@ async function main() {
     )
     .join("\n");
 
-  writeFileSync(
-    path.join(dataDir, "tokens.jsonl"),
-    tokensJsonl + (tokensJsonl ? "\n" : ""),
-  );
-  writeFileSync(
-    path.join(dataDir, "answers.jsonl"),
-    answersJsonl + (answersJsonl ? "\n" : ""),
-  );
+  writeFileSync(path.join(dir, "tokens.jsonl"), tokensJsonl + (tokensJsonl ? "\n" : ""));
+  writeFileSync(path.join(dir, "answers.jsonl"), answersJsonl + (answersJsonl ? "\n" : ""));
+  writeFileSync(path.join(dir, "exported_at"), exportedAt.toISOString() + "\n");
 
-  const tokenCsvHeader =
-    "public_id,issued_at,expires_at,vocab_version,ua_rules_version,ua_class,ua_family,status,effective_status,completed_at,rate_limited,swept\n";
-  const tokenCsv = tokenRows
-    .map((r) =>
-      [
-        publicId(r.id, salt),
-        r.issuedAt.toISOString(),
-        r.expiresAt.toISOString(),
-        r.vocabVersion,
-        r.uaRulesVersion,
-        r.uaClass,
-        r.uaFamily,
-        r.status,
-        effectiveStatus(r.status, r.expiresAt, exportedAt, r.swept),
-        r.completedAt ? r.completedAt.toISOString() : "",
-        r.rateLimited,
-        r.swept,
-      ]
-        .map(csvEscape)
-        .join(","),
-    )
-    .join("\n");
-  writeFileSync(
-    path.join(dataDir, "tokens.csv"),
-    tokenCsvHeader + tokenCsv + (tokenCsv ? "\n" : ""),
-  );
+  const switchover = exportedAt.toISOString().slice(0, 10);
+  const readme = `Pilot, 2026-10-18 to ${switchover}. Different design (multiple-choice visitors' book with a mark). Conditions differed from era 1; kept for completeness, not comparable. Contains known crawler entries; see notes in the previous data README history.
 
-  const answerCsvHeader = "public_id,field,value,answered_at,path,position\n";
-  const answerCsv = answerRows
-    .map((r) =>
-      [
-        publicId(r.tokenId, salt),
-        r.field,
-        r.value,
-        r.answeredAt.toISOString(),
-        r.path,
-        r.position ?? "",
-      ]
-        .map(csvEscape)
-        .join(","),
-    )
-    .join("\n");
-  writeFileSync(
-    path.join(dataDir, "answers.csv"),
-    answerCsvHeader + answerCsv + (answerCsv ? "\n" : ""),
-  );
+This archive is a final dump of the pilot \`tokens\` / \`answers\` tables.
+
+public_ids in this archive were regenerated on 2026-10-20 after a salt rotation; earlier pilot exports in git history used different ids.
+`;
+  writeFileSync(path.join(dir, "README.md"), readme);
 
   const vocabSrc = path.join(process.cwd(), "content", "vocab");
-  for (const file of readdirSync(vocabSrc)) {
-    if (file.endsWith(".json")) {
-      copyFileSync(path.join(vocabSrc, file), path.join(dataDir, "vocab", file));
+  for (const f of readdirSync(vocabSrc)) {
+    if (f.endsWith(".json")) {
+      copyFileSync(path.join(vocabSrc, f), path.join(dir, "vocab", f));
+    }
+  }
+  console.log("Pilot final export written to data/pilot-2026-10/");
+}
+
+async function main() {
+  const url = process.env.DATABASE_URL_READONLY;
+  if (!url) {
+    throw new Error("DATABASE_URL_READONLY is required (no DATABASE_URL fallback)");
+  }
+  const salt = process.env.EXPORT_ID_SALT;
+  if (!salt) throw new Error("EXPORT_ID_SALT is required");
+
+  const exportedAt = new Date();
+  const pool = new Pool({ connectionString: url });
+  const db = drizzle(pool);
+
+  if (process.env.PILOT_FINAL === "1" || process.env.PILOT_FINAL === "true") {
+    await exportPilotFinal(db, salt, exportedAt);
+    await pool.end();
+    return;
+  }
+
+  loadEra1Vocab();
+  const eraDir = path.join(process.cwd(), "data", "era1");
+  const sealedDir = path.join(eraDir, "sealed");
+  mkdirSync(eraDir, { recursive: true });
+  mkdirSync(sealedDir, { recursive: true });
+
+  const frameRows = await db.select().from(canvasState).where(eq(canvasState.id, 1));
+  const frameSize = frameRows[0]?.frameSize ?? 5;
+  const validDrawings = await db.select().from(drawings).where(eq(drawings.status, "valid"));
+  const cells: CanvasCell[] = validDrawings.map((d) => ({
+    x: d.x,
+    y: d.y,
+    pattern: d.pattern,
+    kind: d.kind,
+  }));
+
+  const canvasTxt = renderCanvasText({ frameSize, cells });
+  writeFileSync(path.join(eraDir, "canvas.txt"), canvasTxt + "\n");
+
+  const canvasJson = {
+    frame_size: frameSize,
+    cells: validDrawings.map((d) => ({
+      x: d.x,
+      y: d.y,
+      pattern: d.pattern,
+      seed: d.kind === "seed",
+    })),
+  };
+  writeFileSync(
+    path.join(eraDir, "canvas.json"),
+    JSON.stringify(canvasJson, null, 2) + "\n",
+  );
+
+  const visitRows = await db.select().from(visits);
+  const visitorValid = validDrawings.filter((d) => d.kind === "visitor").length;
+  const declines = visitRows.filter((v) => v.status === "declined").length;
+  const totals = {
+    visits: visitRows.length,
+    entries: visitorValid,
+    declines,
+  };
+  writeFileSync(
+    path.join(eraDir, "totals.json"),
+    JSON.stringify(totals, null, 2) + "\n",
+  );
+  writeFileSync(path.join(eraDir, "exported_at"), exportedAt.toISOString() + "\n");
+
+  // Sealed delta for this UTC day (created or updated)
+  const start = dayStartUtc(exportedAt);
+  const day = exportedAt.toISOString().slice(0, 10);
+
+  const visitDelta = visitRows.filter(
+    (r) => r.issuedAt >= start || r.updatedAt >= start,
+  );
+  const drawingDelta = (
+    await db.select().from(drawings)
+  ).filter((r) => r.createdAt >= start || r.updatedAt >= start);
+  const censusDelta = (
+    await db.select().from(census)
+  ).filter((r) => r.answeredAt >= start || r.updatedAt >= start);
+
+  const lines: string[] = [];
+  for (const r of visitDelta) {
+    lines.push(
+      JSON.stringify({
+        table: "visits",
+        public_id: publicId(r.id, salt),
+        era: r.era,
+        issued_at: r.issuedAt.toISOString(),
+        expires_at: r.expiresAt.toISOString(),
+        vocab_version: r.vocabVersion,
+        ua_rules_version: r.uaRulesVersion,
+        ua_class: r.uaClass,
+        ua_family: r.uaFamily,
+        ua_suspect: r.uaSuspect,
+        status: r.status,
+        effective_status: era1EffectiveStatus(
+          r.status,
+          r.expiresAt,
+          exportedAt,
+          r.swept,
+        ),
+        swept: r.swept,
+        rate_limited: r.rateLimited,
+        late_fetches: r.lateFetches,
+        inherited_from: r.inheritedFrom,
+        completed_at: r.completedAt ? r.completedAt.toISOString() : null,
+        updated_at: r.updatedAt.toISOString(),
+      }),
+    );
+  }
+  for (const r of drawingDelta) {
+    lines.push(
+      JSON.stringify({
+        table: "drawings",
+        id: r.id,
+        public_id: r.visitId ? publicId(r.visitId, salt) : null,
+        kind: r.kind,
+        x: r.x,
+        y: r.y,
+        pattern: r.pattern,
+        path: r.path,
+        option_order: r.optionOrder,
+        status: r.status,
+        excluded_reason: r.excludedReason,
+        created_at: r.createdAt.toISOString(),
+        updated_at: r.updatedAt.toISOString(),
+      }),
+    );
+  }
+  for (const r of censusDelta) {
+    lines.push(
+      JSON.stringify({
+        table: "census",
+        id: r.id,
+        public_id: publicId(r.visitId, salt),
+        field: r.field,
+        value: r.value,
+        answered_at: r.answeredAt.toISOString(),
+        path: r.path,
+        position: r.position,
+        option_order: r.optionOrder,
+        superseded: r.superseded,
+        updated_at: r.updatedAt.toISOString(),
+      }),
+    );
+  }
+
+  const plaintext = lines.join("\n") + (lines.length ? "\n" : "");
+  const deltaHash = sha256Hex(plaintext);
+
+  const recipientPath = path.join(process.cwd(), "seal", "age-recipient.txt");
+  const ageOut = path.join(sealedDir, `${day}.jsonl.age`);
+  if (!existsSync(recipientPath)) {
+    console.warn(
+      "seal/age-recipient.txt missing — skipping sealed encrypt (data stays in DB)",
+    );
+  } else {
+    const recipient = readFileSync(recipientPath, "utf8").trim();
+    const tmpPlain = path.join(sealedDir, `${day}.jsonl`);
+    writeFileSync(tmpPlain, plaintext);
+    const age = spawnSync(
+      "age",
+      ["-r", recipient, "-o", ageOut, tmpPlain],
+      { encoding: "utf8" },
+    );
+    if (age.status !== 0) {
+      console.warn("age encrypt failed:", age.stderr || age.error);
+    } else {
+      console.log("Wrote", ageOut);
+    }
+    try {
+      const { unlinkSync } = await import("fs");
+      unlinkSync(tmpPlain);
+    } catch {
+      /* keep plaintext only if age missing — prefer not to leave it */
     }
   }
 
-  writeFileSync(
-    path.join(dataDir, "exported_at"),
-    exportedAt.toISOString() + "\n",
-  );
-
-  const fingerprint = createHash("sha256")
-    .update(tokensJsonl)
-    .update(answersJsonl)
-    .update(exportedAt.toISOString())
-    .digest("hex");
-  writeFileSync(path.join(dataDir, ".export-fingerprint"), fingerprint + "\n");
-
-  if (!existsSync(path.join(dataDir, "README.md"))) {
-    console.warn("data/README.md missing — expected to be committed in repo");
+  const chainPath = path.join(sealedDir, "chain.txt");
+  let prev = "0".repeat(64);
+  if (existsSync(chainPath)) {
+    const existing = readFileSync(chainPath, "utf8").trim().split("\n").filter(Boolean);
+    if (existing.length > 0) {
+      prev = sha256Hex(existing[existing.length - 1]!);
+    }
+  }
+  const chainLine = `${day}  ${deltaHash}  ${prev}`;
+  const chainBody = existsSync(chainPath)
+    ? readFileSync(chainPath, "utf8").replace(/\s*$/, "") + "\n" + chainLine + "\n"
+    : chainLine + "\n";
+  // Avoid duplicate same-day lines on re-run
+  if (existsSync(chainPath)) {
+    const linesExisting = readFileSync(chainPath, "utf8").trim().split("\n");
+    const withoutToday = linesExisting.filter((l) => !l.startsWith(day + " "));
+    const rebuilt =
+      withoutToday.join("\n") +
+      (withoutToday.length ? "\n" : "") +
+      chainLine +
+      "\n";
+    writeFileSync(chainPath, rebuilt);
+  } else {
+    writeFileSync(chainPath, chainBody);
   }
 
+  const vocabSrc = path.join(process.cwd(), "content", "vocab", "era1.json");
+  mkdirSync(path.join(eraDir, "vocab"), { recursive: true });
+  copyFileSync(vocabSrc, path.join(eraDir, "vocab", "era1.json"));
+
+  console.log("Era 1 export written to data/era1/");
   await pool.end();
-  console.log(
-    `Exported ${tokenRows.length} tokens, ${answerRows.length} answers at ${exportedAt.toISOString()} (read-only, public_id).`,
-  );
 }
 
 main().catch((err) => {

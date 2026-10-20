@@ -15,6 +15,13 @@
       "when": 1760801400000,
       "tag": "0001_swept",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1760976000000,
+      "tag": "0002_era1",
+      "breakpoints": true
     }
   ]
 }

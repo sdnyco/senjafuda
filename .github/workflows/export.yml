@@ -4,7 +4,13 @@ on:
   schedule:
     - cron: "0 3 * * *"
   workflow_dispatch:
+    inputs:
+      pilot_final:
+        description: "Export pilot tables into data/pilot-2026-10/ (one-shot after era1 deploy)"
+        type: boolean
+        default: false
 
+# contents:write only on this export job (spec §12)
 permissions:
   contents: write
 
@@ -12,13 +18,13 @@ jobs:
   export:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
         with:
           version: 10.34.7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: pnpm
@@ -26,11 +32,17 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Install age
+        if: ${{ inputs.pilot_final != true }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq age
+
       - name: Export from database
         env:
           DATABASE_URL_READONLY: ${{ secrets.DATABASE_URL_READONLY }}
-          # Never rotate: public_id continuity depends on a fixed salt.
           EXPORT_ID_SALT: ${{ secrets.EXPORT_ID_SALT }}
+          PILOT_FINAL: ${{ inputs.pilot_final == true && '1' || '' }}
         run: pnpm exec tsx scripts/export.ts
 
       - name: Commit if changed

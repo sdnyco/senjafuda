@@ -1,37 +1,54 @@
 import { readFileSync } from "fs";
 import path from "path";
-import { loadVocab, activeFields } from "@/lib/vocab";
+import { loadEra1Vocab } from "@/lib/era1-vocab";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export function GET() {
   const header = readFileSync(
-    path.join(process.cwd(), "content", "llms-header.md"),
+    path.join(process.cwd(), "content", "era1", "llms-header.md"),
     "utf8",
   );
-  const vocab = loadVocab();
-  const lines: string[] = [header.trim(), "", "## Vocabulary v" + vocab.version, ""];
+  const vocab = loadEra1Vocab();
 
-  for (const field of activeFields(vocab)) {
-    lines.push(`### ${field.id}`);
-    lines.push(field.question);
-    if (field.note) lines.push(field.note);
-    for (const opt of field.options) {
-      lines.push(`- \`${opt.id}\`: ${opt.label}`);
-    }
-    lines.push("");
-  }
+  const patterns = vocab.patterns
+    .map((p) => `- \`${p.id}\` ${p.glyph} — ${p.description}`)
+    .join("\n");
 
-  lines.push("### decline_reason");
-  lines.push("Optional reasons when declining to sign:");
-  for (const r of vocab.decline_reasons) {
-    lines.push(`- \`${r.id}\`: ${r.label}`);
-  }
-  lines.push("");
-  lines.push(`Skip sentinel value: \`${vocab.skip_value}\``);
-  lines.push("");
+  const fields = vocab.fields
+    .filter((f) => f.enabled)
+    .map((f) => {
+      const opts = f.options.map((o) => o.id).join(", ");
+      return `### ${f.id}\n${f.question}\nOptions: ${opts}`;
+    })
+    .join("\n\n");
 
-  return new Response(lines.join("\n"), {
+  const declines = vocab.decline_reasons.map((r) => r.id).join(", ");
+
+  const body = `${header.trim()}
+
+## Patterns
+
+${patterns}
+
+## Census fields
+
+${fields}
+
+## Decline reasons
+
+${declines}
+
+## robots.txt
+
+If robots.txt blocks your fetcher from the sign links, that is an oversight; the person who sent you can open an issue at the GitHub repository.
+
+## Data
+
+Public canvas and totals: /data (GitHub). Attribution and census answers are sealed until 2036-10-18 at the latest.
+`;
+
+  return new Response(body, {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "public, max-age=300",

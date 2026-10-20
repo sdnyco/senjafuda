@@ -10,6 +10,9 @@ Disallow: /s/
 Disallow: /sign
 Disallow: /sign/
 Disallow: /rate-limited
+Disallow: /temporarily-closed
+Disallow: /source-cap
+Disallow: /decline-cap
 `;
 
 export function GET() {

@@ -123,8 +123,9 @@ export async function writeAnswer(opts: {
  * → `swept = true` and status stays as stored.
  */
 export async function recordSweepGet(tokenId: string): Promise<SweepMark> {
-  const tripped = await noteSweepHit(tokenId);
-  if (!tripped) return "none";
+  const hit = await noteSweepHit(tokenId);
+  if (hit.unavailable) return "none"; // pilot path unused; era1 handles unavailable
+  if (!hit.tripped) return "none";
 
   const db = getDb();
   return db.transaction(async (tx) => {

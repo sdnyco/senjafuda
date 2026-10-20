@@ -1,78 +1,126 @@
-import { NextResponse } from "next/server";
-import { commitSigned, writeAnswer } from "@/lib/answers";
-import { checkRateLimit } from "@/lib/rate-limit";
-import { markRateLimited } from "@/lib/tokens";
-import { activeFields, isValidOption, loadVocab } from "@/lib/vocab";
+import { NextResponse, type NextRequest } from "next/server";
+import {
+  activeCensusFields,
+  isValidCensusOption,
+  isValidPatternId,
+  loadEra1Vocab,
+} from "@/lib/era1-vocab";
+import { writeCensusAnswer, writeDrawing } from "@/lib/era1-write";
+import { verifySignature } from "@/lib/link-sign";
+import {
+  checkDrawLimit,
+  checkWriteLimit,
+} from "@/lib/rate-limit";
+import { redirectIfUnavailable } from "@/lib/upstash-response";
+import { isValidVisitIdFormat } from "@/lib/visit-id";
+import {
+  getVisit,
+  incrementLateFetches,
+  isVisitUnusable,
+  markVisitRateLimited,
+} from "@/lib/visits";
+import { finishVisit } from "@/lib/era1-write";
 
 export const dynamic = "force-dynamic";
 
-function redirect(url: string, status = 302) {
-  const res = NextResponse.redirect(url, status);
+function redirectTo(url: string) {
+  const res = NextResponse.redirect(url, 302);
   res.headers.set("Cache-Control", "no-store");
-  res.headers.set("X-Robots-Tag", "noindex");
   return res;
 }
 
-function html(body: string, status: number) {
-  return new NextResponse(body, {
-    status,
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",
-      "X-Robots-Tag": "noindex",
-    },
-  });
-}
-
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const origin = request.nextUrl.origin;
   const form = await request.formData();
-  const tokenId = String(form.get("t") ?? "");
-  if (!tokenId) {
-    return html("<h1>Missing token</h1>", 400);
+  const v = String(form.get("v") ?? "");
+  const n = String(form.get("n") ?? "");
+  const pattern = String(form.get("pattern") ?? "");
+  const x = Number(form.get("x"));
+  const y = Number(form.get("y"));
+
+  if (
+    !isValidVisitIdFormat(v) ||
+    !isValidPatternId(pattern) ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y)
+  ) {
+    return new NextResponse("Not found", { status: 404 });
   }
 
-  const answerLimit = await checkRateLimit("answer");
-  const commitLimit = await checkRateLimit("commit");
-  if (!answerLimit.success || !commitLimit.success) {
-    await markRateLimited(tokenId).catch(() => undefined);
-    return redirect(new URL("/rate-limited", request.url).toString(), 429);
+  const writeLim = await checkWriteLimit();
+  const closed = redirectIfUnavailable(origin, writeLim);
+  if (closed) return closed;
+  if (!writeLim.success) {
+    await markVisitRateLimited(v).catch(() => {});
+    return redirectTo(`${origin}/rate-limited`);
+  }
+  const drawLim = await checkDrawLimit();
+  const closedDraw = redirectIfUnavailable(origin, drawLim);
+  if (closedDraw) return closedDraw;
+  if (!drawLim.success) {
+    return redirectTo(`${origin}/source-cap`);
   }
 
-  const vocab = loadVocab();
-  for (const field of activeFields(vocab)) {
-    const raw = form.get(field.id);
-    if (raw == null || raw === "") continue;
-    const value = String(raw);
-    if (!isValidOption(field.id, value, vocab) || value === vocab.skip_value) {
-      return html("<h1>Invalid option</h1>", 400);
+  const visit = await getVisit(v);
+  if (!visit || (await isVisitUnusable(visit))) {
+    return redirectTo(`${origin}/`);
+  }
+
+  const verified = verifySignature(n, {
+    visitId: visit.id,
+    action: "form",
+    target: "",
+    x: String(x),
+    y: String(y),
+  });
+  if (!verified.ok) {
+    await incrementLateFetches(visit.id);
+    return redirectTo(`${origin}/sign?v=${visit.id}&note=expired`);
+  }
+
+  const drawn = await writeDrawing({
+    visitId: visit.id,
+    patternId: pattern,
+    x,
+    y,
+    path: "form",
+  });
+  if (!drawn.ok) {
+    if (drawn.reason === "cell_taken") {
+      const q = new URLSearchParams({ v: visit.id, note: "taken" });
+      const vocab = loadEra1Vocab();
+      for (const field of activeCensusFields(vocab)) {
+        const raw = form.get(field.id);
+        if (raw != null && String(raw) !== "") {
+          q.set(field.id, String(raw));
+        }
+      }
+      if (pattern) q.set("pattern", pattern);
+      return redirectTo(`${origin}/sign?${q.toString()}`);
     }
-    const result = await writeAnswer({
-      tokenId,
+    return redirectTo(`${origin}/sign?v=${visit.id}&note=expired`);
+  }
+
+  const vocab = loadEra1Vocab();
+  for (const field of activeCensusFields(vocab)) {
+    const raw = form.get(field.id);
+    if (raw == null || String(raw) === "") continue;
+    const value = String(raw);
+    if (!isValidCensusOption(field.id, value, vocab)) continue;
+    const ans = await writeCensusAnswer({
+      visitId: visit.id,
       field: field.id,
       value,
       path: "form",
     });
-    if (!result.ok) {
-      if (result.reason === "terminal" || result.reason === "expired") {
-        return redirect(new URL(`/s/${tokenId}/thanks`, request.url).toString());
-      }
-      if (result.reason === "not_found") {
-        return redirect(new URL("/", request.url).toString());
-      }
-      return html("<h1>Could not record answer</h1>", 400);
-    }
-    if (result.token.status === "branched") {
-      return redirect(new URL(`/s/${tokenId}/thanks`, request.url).toString());
+    if (ans.ok && ans.visit.status === "branched") {
+      return redirectTo(`${origin}/s/${visit.id}/thanks`);
     }
   }
 
-  await commitSigned(tokenId);
-  return redirect(new URL(`/s/${tokenId}/thanks`, request.url).toString());
-}
-
-export function HEAD() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex" },
-  });
+  const finished = await finishVisit(visit.id);
+  if (!finished.ok) {
+    return redirectTo(`${origin}/s/${visit.id}/thanks`);
+  }
+  return redirectTo(`${origin}/s/${visit.id}/thanks`);
 }

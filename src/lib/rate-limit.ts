@@ -120,7 +120,7 @@ export async function resetSourceCapCounters(): Promise<
   try {
     const ip = await clientIp();
     const key = rateLimitKey(ip);
-    const kinds: LimitKind[] = ["draw", "decline", "write"];
+    const kinds: LimitKind[] = ["draw", "decline", "write", "mint_source", "s_get"];
     const cleared: string[] = [];
     for (const kind of kinds) {
       // @upstash/ratelimit sliding-window keys — wipe by prefix match

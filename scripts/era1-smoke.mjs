@@ -250,6 +250,9 @@ async function runHookEcho() {
 }
 
 async function runRemaining() {
+  // Clear per-source counters so a long Run C does not starve later mint/write tests.
+  await req("/api/test/reset-source-caps", { method: "POST" });
+
   // 5. Same-cell race — find an empty cell, then force both visits onto it
   {
     const candidates = [
@@ -326,28 +329,34 @@ async function runRemaining() {
 
   // 8. Sweep: 3 /s/ hits in 2s → branched; drawn then swept → drawing excluded
   {
+    await req("/api/test/reset-source-caps", { method: "POST" });
     const { id } = await mintVisit();
     if (!id) {
       record("8-sweep", false, "no visit");
     } else {
-      // Three GETs in the 2s window (threshold is 3). Branched visits remint on
-      // the next draw (R1), so expect the "earlier visit" note + a new visit id.
-      await req(`/s/${id}/draw`);
-      await req(`/s/${id}/draw`);
-      await req(`/s/${id}/draw`);
+      // Three GETs must land inside the 2s window — Preview RTTs are ~1s each,
+      // so fire them in parallel. Branched visits remint on the next draw (R1).
+      await Promise.all([
+        req(`/s/${id}/draw`),
+        req(`/s/${id}/draw`),
+        req(`/s/${id}/draw`),
+      ]);
       const again = await req(`/s/${id}/draw`);
       const reminted = extractVisitId(again.body);
       const branchedHint =
         /earlier visit/i.test(again.body) ||
+        /This visit is complete|Start a fresh cell/i.test(again.body) ||
         (Boolean(reminted) && reminted !== id);
       const d = await drawOnce();
       let sweptDrawing = false;
       if (d.ok && d.write.status === 302) {
         const vid = d.id;
         const link = parseDrawLink(d.draw.body);
-        await req(`/s/${vid}/arrival`);
-        await req(`/s/${vid}/arrival`);
-        await req(`/s/${vid}/arrival`);
+        await Promise.all([
+          req(`/s/${vid}/arrival`),
+          req(`/s/${vid}/arrival`),
+          req(`/s/${vid}/arrival`),
+        ]);
         // After sweep-exclude, a new visit forced onto the same cell should win.
         if (link) {
           const reclaim = await drawOnce(`${link.x},${link.y}`);
@@ -378,6 +387,7 @@ async function runRemaining() {
         status: d.write?.status,
         cap: loc.includes("source-cap"),
         census: /\/(arrival|decider|family|return)/.test(loc),
+        ok: Boolean(d.ok && d.write),
       });
     }
     const first5 = outcomes.slice(0, 5).every((o) => o.census);
@@ -385,7 +395,7 @@ async function runRemaining() {
     record(
       "9-source-cap",
       reset.status === 200 && first5 && sixthCap,
-      `reset=${reset.status} outcomes=${outcomes.map((o) => `${o.i}:${o.cap ? "cap" : o.census ? "ok" : o.status}`).join(",")}`,
+      `reset=${reset.status} outcomes=${outcomes.map((o) => `${o.i}:${o.cap ? "cap" : o.census ? "ok" : o.status ?? "novisit"}`).join(",")}`,
     );
   }
 

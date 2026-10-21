@@ -128,8 +128,13 @@ export default async function DrawPage({ params, searchParams }: Props) {
     return <VisitClosed freshHref={`/s/${visit.id}/fresh?n=${fresh}`} />;
   }
 
-  if ((await applySweepHit(visit.id)) === "unavailable") {
+  const sweep = await applySweepHit(visit.id);
+  if (sweep === "unavailable") {
     redirectTemporarilyClosedPage();
+  }
+  if (sweep === "branched" || sweep === "swept") {
+    const fresh = signFreshLink({ visitId: visit.id });
+    return <VisitClosed freshHref={`/s/${visit.id}/fresh?n=${fresh}`} />;
   }
 
   const hooks = testHooksAllowed(h.get("x-senjafuda-test"));

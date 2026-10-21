@@ -46,11 +46,9 @@ export async function assignCellForVisit(
   let s = await getFrameSize(db);
   const cells = await loadValidCells(db);
   if (force) {
-    const filled = new Set(cells.map((c) => `${c.x},${c.y}`));
-    if (
-      !filled.has(`${force.x},${force.y}`) &&
-      !(force.x === 0 && force.y === 0)
-    ) {
+    // Preview test hooks may force a cell even when filled (§13.5 race):
+    // the page still shows that cell; the write path returns note=taken.
+    if (!(force.x === 0 && force.y === 0)) {
       return { cell: force, frameSize: s };
     }
   }

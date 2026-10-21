@@ -97,8 +97,14 @@ export async function GET(request: NextRequest, ctx: Ctx) {
     );
   }
 
-  if ((await applySweepHit(visit.id)) === "unavailable") {
-    return redirectTemporarilyClosed(origin);
+  {
+    const sweep = await applySweepHit(visit.id);
+    if (sweep === "unavailable") {
+      return redirectTemporarilyClosed(origin);
+    }
+    if (sweep === "branched" || sweep === "swept") {
+      return redirectTo(`${origin}/s/${visit.id}/thanks`);
+    }
   }
 
   const verified = verifySignature(n, {

@@ -69,8 +69,13 @@ export default async function DeclinePage({ params }: Props) {
     );
   }
 
-  if ((await applySweepHit(visit.id)) === "unavailable") {
+  const sweep = await applySweepHit(visit.id);
+  if (sweep === "unavailable") {
     redirectTemporarilyClosedPage();
+  }
+  if (sweep === "branched" || sweep === "swept") {
+    const fresh = signFreshLink({ visitId: visit.id });
+    return <VisitClosed freshHref={`/s/${visit.id}/fresh?n=${fresh}`} />;
   }
 
   const h = await headers();

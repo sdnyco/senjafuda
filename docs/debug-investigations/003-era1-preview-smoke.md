@@ -74,17 +74,40 @@ Both need Preview test hooks (`x-senjafuda-test` = `TEST_HOOK_SECRET`).
 
 **Next step:** confirm header forwarding (or use protection-bypass + raw `fetch`), then re-run 5 and 7 on a fresh Preview source (or after the daily source-cap window resets).
 
+
+## Run C — fetch + protection bypass (remaining §13)
+
+**Date:** 2026-10-21T08:31:12.304Z
+**Preview deployment:** https://senjafuda-qpei29dec-sdnycos-projects.vercel.app
+**Method:** Node `fetch` with `x-vercel-protection-bypass` + `x-senjafuda-test` (no `vercel curl` for hooks)
+**Automated:** **6/10** checks in this run
+
+| Id | Result | Detail |
+|---|---|---|
+| 0-hook-echo | PASS | status=200 body={"ok":true,"hooks":true,"env":"preview"} |
+| 5-cell-race | FAIL | A=302/.vercel.app/s/UKNJJLRRPBURFSG5SM5T6CLW74/arrival B=302/.vercel.app/s/NMRLUA6OWY7APCXA2EMWSC5MVU/arrival |
+| 7-growth | PASS | status=200 created=12 canvas7=false |
+| 8-sweep | FAIL | pre-draw-sweep=false drawn-then-hits=true |
+| 9-source-cap | PASS | reset=200 outcomes=1:ok,2:ok,3:ok,4:ok,5:ok,6:cap |
+| 10-decline | PASS | declineWrite=true refuseAfterDraw=true |
+| 11-form | PASS | status=302 loc=cts.vercel.app/s/M26BGI4KUSVFAGXQYM2RQ6B2FE/thanks |
+| 12-census-correction | PASS | branchLt30=true supersedeGte30=true |
+| 14-export | FAIL | no public key in keygen output |
+| 15-no-ip-ua | FAIL | dbHits=parse-fail exit=1 |
+
+
 ## Manual checks still required
 
-- [ ] 5 Same-cell race (after hook-header fix)
-- [ ] 7 Growth to 7×7 at 12/24 (after hook-header fix)
+- [ ] 5 Same-cell race
+- [x] 7 Growth to 7×7 at 12/24
 - [ ] 8 Sweep: 3 `/s/` hits in 2 s → branched; drawn then swept → drawing excluded
-- [ ] 9 Per-source drawing cap (6th refused) — *partially evidenced by Run B hitting `/source-cap` after prior draws; not a controlled 6th-draw check*
-- [ ] 10 Decline reason write + refuse decline after drawing
-- [ ] 11 Form path end-to-end with JS disabled
-- [ ] 12 Census correction ≥ 30 s → superseded; < 30 s different → branched
+- [x] 9 Per-source drawing cap (6th refused)
+- [x] 10 Decline reason write + refuse decline after drawing
+- [x] 11 Form path end-to-end with JS disabled
+- [x] 12 Census correction ≥ 30 s → superseded; < 30 s different → branched
 - [ ] 14 Export dry run against preview DB (public files + sealed test recipient)
 - [ ] 15 No raw IP/UA in DB or exports
+
 
 ## Notes
 

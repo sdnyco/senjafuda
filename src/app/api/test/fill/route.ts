@@ -55,5 +55,7 @@ export async function POST(request: NextRequest) {
     created += 1;
   }
 
-  return NextResponse.json({ created });
+  const { getFrameSize } = await import("@/lib/canvas");
+  const frameSize = await getFrameSize(db);
+  return NextResponse.json({ created, frameSize });
 }

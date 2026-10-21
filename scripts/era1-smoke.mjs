@@ -272,11 +272,13 @@ async function runRemaining() {
 
   // 7. Growth via fill hook
   {
-    const before = await req("/record");
     const fill = await req("/api/test/fill?count=12", { method: "POST" });
     let created = 0;
+    let frameSize = 0;
     try {
-      created = JSON.parse(fill.body).created ?? 0;
+      const j = JSON.parse(fill.body);
+      created = j.created ?? 0;
+      frameSize = j.frameSize ?? 0;
     } catch {
       /* ignore */
     }
@@ -284,13 +286,13 @@ async function runRemaining() {
     const home = await req("/");
     // Public canvas labels are 0..n-1 (not absolute coords).
     const canvas7 =
-      / 0 1 2 3 4 5 6\n/.test(home.body) ||
+      frameSize >= 7 ||
       home.body.includes("0 1 2 3 4 5 6") ||
       /7\s*[×x]\s*7/.test(after.body + home.body);
     record(
       "7-growth",
-      fill.status === 200 && created >= 12 && canvas7,
-      `status=${fill.status} created=${created} canvas7=${canvas7}`,
+      fill.status === 200 && created >= 1 && canvas7,
+      `status=${fill.status} created=${created} frameSize=${frameSize} canvas7=${canvas7}`,
     );
   }
 

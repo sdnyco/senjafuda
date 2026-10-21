@@ -5,6 +5,7 @@ import { drawings, visits } from "@/db/schema";
 import { applyGrowthRule } from "@/lib/canvas";
 import { assignCellForVisit } from "@/lib/era1-write";
 import { patternOptionOrder } from "@/lib/era1-shuffle";
+import { refuseProductionTestRoute } from "@/lib/test-routes";
 import { testHooksAllowed } from "@/lib/test-hooks";
 import { issueVisit } from "@/lib/visits";
 
@@ -15,6 +16,8 @@ export const dynamic = "force-dynamic";
  * Header x-senjafuda-test must equal TEST_HOOK_SECRET.
  */
 export async function POST(request: NextRequest) {
+  const refused = refuseProductionTestRoute();
+  if (refused) return refused;
   if (!testHooksAllowed(request.headers.get("x-senjafuda-test"))) {
     return new NextResponse("Not found", { status: 404 });
   }
@@ -55,7 +58,10 @@ export async function POST(request: NextRequest) {
     created += 1;
   }
 
-  const { getFrameSize } = await import("@/lib/canvas");
+  const { getFrameSize, countValidVisitorDrawings } = await import(
+    "@/lib/canvas"
+  );
   const frameSize = await getFrameSize(db);
-  return NextResponse.json({ created, frameSize });
+  const visitorValid = await countValidVisitorDrawings(db);
+  return NextResponse.json({ created, frameSize, visitorValid });
 }

@@ -6,6 +6,7 @@ import { canvasState, census, drawings, visits } from "@/db/schema";
 import { renderCanvasText, type CanvasCell } from "@/lib/canvas";
 import { publicId } from "@/lib/public-id";
 import { era1EffectiveStatus } from "@/lib/era1-effective-status";
+import { refuseProductionTestRoute } from "@/lib/test-routes";
 import { testHooksAllowed } from "@/lib/test-hooks";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,8 @@ function sha256Hex(s: string): string {
  * for the smoke runner to age-encrypt/decrypt locally with a throwaway key.
  */
 export async function POST(request: NextRequest) {
+  const refused = refuseProductionTestRoute();
+  if (refused) return refused;
   if (!testHooksAllowed(request.headers.get("x-senjafuda-test"))) {
     return new NextResponse("Not found", { status: 404 });
   }

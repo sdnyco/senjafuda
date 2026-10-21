@@ -38,6 +38,24 @@ export function growthThreshold(s: number): number {
   return Math.ceil(fillableCount(s) / 2);
 }
 
+/**
+ * Pure growth step (R10 / §3): at most one ring per call, and only when the
+ * valid visitor count meets the threshold for the *current* frame.
+ * Does not cascade (a large count must grow one step per drawing).
+ */
+export function nextFrameSizeAfterDrawing(
+  frameSize: number,
+  validVisitorCount: number,
+): number {
+  if (frameSize < 1 || frameSize % 2 === 0) {
+    return frameSize;
+  }
+  if (validVisitorCount >= growthThreshold(frameSize)) {
+    return frameSize + 2;
+  }
+  return frameSize;
+}
+
 /** Absolute coords of every cell in the frame, including the seed. */
 export function frameCoords(s: number): CellCoord[] {
   const h = frameHalf(s);
@@ -167,6 +185,7 @@ export async function countValidVisitorDrawings(
 
 /**
  * Apply growth rule inside an open transaction. Locks canvas_state.
+ * At most one +2 step per call (call once after each new valid visitor drawing).
  * Returns the (possibly new) frame size.
  */
 export async function applyGrowthRule(tx: QueryDb): Promise<number> {
@@ -175,18 +194,16 @@ export async function applyGrowthRule(tx: QueryDb): Promise<number> {
     .from(canvasState)
     .where(eq(canvasState.id, 1))
     .for("update");
-  let s = stateRows[0]?.frameSize ?? 5;
+  const s = stateRows[0]?.frameSize ?? 5;
   const count = await countValidVisitorDrawings(tx);
-  while (count >= growthThreshold(s)) {
-    s = s + 2;
-  }
-  if (stateRows[0] && stateRows[0].frameSize !== s) {
+  const next = nextFrameSizeAfterDrawing(s, count);
+  if (stateRows[0] && stateRows[0].frameSize !== next) {
     await tx
       .update(canvasState)
-      .set({ frameSize: s })
+      .set({ frameSize: next })
       .where(eq(canvasState.id, 1));
   }
-  return s;
+  return next;
 }
 
 /** Unfilled absolute coords in the current frame (seed excluded). */

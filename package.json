@@ -14,7 +14,8 @@
     "db:push": "drizzle-kit push",
     "db:seed": "tsx scripts/seed.ts",
     "data:export": "tsx scripts/export.ts",
-    "check:prod-config": "node scripts/check-prod-config.mjs"
+    "check:prod-config": "node scripts/check-prod-config.mjs",
+    "test": "tsx --test src/lib/canvas-growth.test.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

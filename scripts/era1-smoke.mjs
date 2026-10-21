@@ -13,6 +13,11 @@
  *   GET  /api/test/hook-echo              — confirms hooks reach the app
  *   POST /api/test/fill?count=n           — create n valid drawings (growth)
  *   POST /api/test/reset-source-caps      — clear this source's draw/decline/write counters
+ *   POST /api/test/reset-growth-fixture   — exclude visitor drawings; frameSize=5
+ *   GET  /api/test/census-superseded      — count superseded census rows
+ *   POST /api/test/export-dry-run         — public + sealed plaintext for age CLI
+ *   GET  /api/test/scan-ip-ua             — §15 table scan
+ *   All /api/test/* must 404 on production (VERCEL_ENV check first)
  *
  * Env:
  *   PREVIEW_DEPLOYMENT — required (https://….vercel.app)
@@ -301,29 +306,43 @@ async function runRemaining() {
     }
   }
 
-  // 7. Growth via fill hook
+  // 7. Growth: reset fixture → 11 (still 5) → +1 to 12 (exactly 7)
   {
-    const fill = await req("/api/test/fill?count=12", { method: "POST" });
-    let created = 0;
-    let frameSize = 0;
+    const reset = await req("/api/test/reset-growth-fixture", {
+      method: "POST",
+    });
+    const below = await req("/api/test/fill?count=11", { method: "POST" });
+    let belowFrame = -1;
+    let belowCount = -1;
     try {
-      const j = JSON.parse(fill.body);
-      created = j.created ?? 0;
-      frameSize = j.frameSize ?? 0;
+      const j = JSON.parse(below.body);
+      belowFrame = j.frameSize ?? -1;
+      belowCount = j.visitorValid ?? -1;
     } catch {
       /* ignore */
     }
-    const after = await req("/record");
-    const home = await req("/");
-    // Public canvas labels are 0..n-1 (not absolute coords).
-    const canvas7 =
-      frameSize >= 7 ||
-      home.body.includes("0 1 2 3 4 5 6") ||
-      /7\s*[×x]\s*7/.test(after.body + home.body);
+    const cross = await req("/api/test/fill?count=1", { method: "POST" });
+    let frameSize = -1;
+    let visitorValid = -1;
+    try {
+      const j = JSON.parse(cross.body);
+      frameSize = j.frameSize ?? -1;
+      visitorValid = j.visitorValid ?? -1;
+    } catch {
+      /* ignore */
+    }
+    const pass =
+      reset.status === 200 &&
+      below.status === 200 &&
+      belowFrame === 5 &&
+      belowCount === 11 &&
+      cross.status === 200 &&
+      visitorValid === 12 &&
+      frameSize === 7;
     record(
       "7-growth",
-      fill.status === 200 && created >= 1 && canvas7,
-      `status=${fill.status} created=${created} frameSize=${frameSize} canvas7=${canvas7}`,
+      pass,
+      `reset=${reset.status} at11=${belowFrame}/${belowCount} at12=${frameSize}/${visitorValid}`,
     );
   }
 
@@ -517,6 +536,7 @@ async function runRemaining() {
 
     // Supersede path (≥30s): draw, answer, wait 31s, answer differently
     const d2 = await drawOnce();
+    let supersededCount = 0;
     if (d2.ok && d2.write.location) {
       const censusPage = await req(
         new URL(d2.write.location, DEP).pathname,
@@ -539,26 +559,27 @@ async function runRemaining() {
           const a2 = await req(
             `/s/${link1.visitId}/arrival/${other[1]}?n=${encodeURIComponent(decodeURIComponent(other[2]))}`,
           );
-          // Should continue (not branch) — next field or same flow
-          superOk =
-            a2.status === 302 &&
-            !(await (async () => {
-              const t = await req(`/s/${link1.visitId}/thanks`);
-              return /branched/i.test(t.body);
-            })());
-          // Stronger: next should be decider or finish, visit still drawn/signed later
           superOk =
             a2.status === 302 &&
             /\/(decider|family|return|finish|thanks)/.test(
               a2.location || "",
             );
+          const q = await req(
+            `/api/test/census-superseded?v=${encodeURIComponent(link1.visitId)}&field=arrival`,
+          );
+          try {
+            supersededCount = JSON.parse(q.body).supersededCount ?? 0;
+          } catch {
+            supersededCount = 0;
+          }
+          superOk = superOk && q.status === 200 && supersededCount >= 1;
         }
       }
     }
     record(
       "12-census-correction",
       branchOk && superOk,
-      `branchLt30=${branchOk} supersedeGte30=${superOk}`,
+      `branchLt30=${branchOk} supersedeGte30=${superOk} supersededRows=${supersededCount}`,
     );
   }
 
@@ -567,6 +588,51 @@ async function runRemaining() {
 
   // 15. IP/UA grep on DB + export files
   await runIpUaCheck();
+
+  // Production: every /api/test/* must 404 (no hooks/bypass needed)
+  await runProductionTestRoute404s();
+}
+
+async function runProductionTestRoute404s() {
+  const prod =
+    (process.env.PRODUCTION_URL || process.env.SITE_ORIGIN || "").replace(
+      /\/$/,
+      "",
+    ) || "https://senjafuda.org";
+  const paths = [
+    { method: "GET", path: "/api/test/hook-echo" },
+    { method: "POST", path: "/api/test/fill?count=1" },
+    { method: "POST", path: "/api/test/reset-source-caps" },
+    { method: "POST", path: "/api/test/reset-growth-fixture" },
+    { method: "POST", path: "/api/test/export-dry-run" },
+    { method: "GET", path: "/api/test/scan-ip-ua" },
+    { method: "GET", path: "/api/test/census-superseded?v=AAAAAAAAAAAAAAAAAAAAAAAAAA" },
+  ];
+  const details = [];
+  let all404 = true;
+  for (const p of paths) {
+    try {
+      const res = await fetch(`${prod}${p.path}`, {
+        method: p.method,
+        redirect: "manual",
+        headers: {
+          // Even with a forged hook header, production must 404 first.
+          "x-senjafuda-test": "must-not-matter",
+        },
+      });
+      const ok = res.status === 404;
+      if (!ok) all404 = false;
+      details.push(`${p.path}:${res.status}`);
+    } catch (e) {
+      all404 = false;
+      details.push(`${p.path}:err`);
+    }
+  }
+  record(
+    "prod-test-routes-404",
+    all404,
+    `prod=${prod} ${details.join(" ")}`,
+  );
 }
 
 async function runExportDryRun() {
@@ -679,18 +745,14 @@ function writeReport() {
   mkdirSync(dir, { recursive: true });
   const out = path.join(dir, "003-era1-preview-smoke.md");
   const existing = existsSync(out) ? readFileSync(out, "utf8") : "";
-  // Keep Runs A/B; append/replace Run C section
-  const withoutC = existing.replace(
-    /\n## Run C[\s\S]*?(?=\n## Manual|\n## Blockers|\n## Notes|$)/,
-    "\n",
-  );
+  const withoutD = existing.replace(/\n## Run D[\s\S]*?(?=\n## |$)/, "\n");
   const passed = results.filter((r) => r.pass).length;
-  const runC = `
-## Run C — fetch + protection bypass (remaining §13)
+  const runD = `
+## Run D — growth fix, prod test-route 404s, superseded query
 
 **Date:** ${new Date().toISOString()}
 **Preview deployment:** ${DEP}
-**Method:** Node \`fetch\` with \`x-vercel-protection-bypass\` + \`x-senjafuda-test\` (no \`vercel curl\` for hooks)
+**Method:** Node \`fetch\` + protection bypass + test hooks
 **Automated:** **${passed}/${results.length}** checks in this run
 
 | Id | Result | Detail |
@@ -703,46 +765,14 @@ ${results
   .join("\n")}
 
 `;
-  let next = withoutC;
-  if (next.includes("## Manual checks still required")) {
-    next = next.replace(
-      "## Manual checks still required",
-      runC + "## Manual checks still required",
-    );
+  let next = withoutD;
+  if (next.includes("## Checklist")) {
+    next = next.replace("## Checklist", runD + "## Checklist");
   } else if (next.includes("## Notes")) {
-    next = next.replace("## Notes", runC + "## Notes");
+    next = next.replace("## Notes", runD + "## Notes");
   } else {
-    next = next.trimEnd() + "\n" + runC;
+    next = next.trimEnd() + "\n" + runD;
   }
-
-  // Update manual checklist boxes for items we ran
-  const checked = [
-    "5 Same-cell",
-    "7 Growth",
-    "8 Sweep",
-    "9 Per-source",
-    "10 Decline",
-    "11 Form",
-    "12 Census",
-    "14 Export",
-    "15 No raw",
-  ];
-  // Simpler: rewrite manual section based on results
-  const manual = `
-## Manual checks still required
-
-${results.some((r) => r.id === "5-cell-race" && r.pass) ? "- [x]" : "- [ ]"} 5 Same-cell race
-${results.some((r) => r.id === "7-growth" && r.pass) ? "- [x]" : "- [ ]"} 7 Growth to 7×7 at 12/24
-${results.some((r) => r.id === "8-sweep" && r.pass) ? "- [x]" : "- [ ]"} 8 Sweep: 3 \`/s/\` hits in 2 s → branched; drawn then swept → drawing excluded
-${results.some((r) => r.id === "9-source-cap" && r.pass) ? "- [x]" : "- [ ]"} 9 Per-source drawing cap (6th refused)
-${results.some((r) => r.id === "10-decline" && r.pass) ? "- [x]" : "- [ ]"} 10 Decline reason write + refuse decline after drawing
-${results.some((r) => r.id === "11-form" && r.pass) ? "- [x]" : "- [ ]"} 11 Form path end-to-end with JS disabled
-${results.some((r) => r.id === "12-census-correction" && r.pass) ? "- [x]" : "- [ ]"} 12 Census correction ≥ 30 s → superseded; < 30 s different → branched
-${results.some((r) => r.id === "14-export" && r.pass) ? "- [x]" : "- [ ]"} 14 Export dry run against preview DB (public files + sealed test recipient)
-${results.some((r) => r.id === "15-no-ip-ua" && r.pass) ? "- [x]" : "- [ ]"} 15 No raw IP/UA in DB or exports
-`;
-  next = next.replace(/## Manual checks still required[\s\S]*?(?=\n## )/, manual + "\n");
-
   writeFileSync(out, next);
   console.log("Wrote", out);
 }

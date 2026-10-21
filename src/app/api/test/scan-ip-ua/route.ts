@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { refuseProductionTestRoute } from "@/lib/test-routes";
 import { testHooksAllowed } from "@/lib/test-hooks";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
  * Preview-only §15: scan era-1 tables for IP- or raw-UA-like strings.
  */
 export async function GET(request: NextRequest) {
+  const refused = refuseProductionTestRoute();
+  if (refused) return refused;
   if (!testHooksAllowed(request.headers.get("x-senjafuda-test"))) {
     return new NextResponse("Not found", { status: 404 });
   }

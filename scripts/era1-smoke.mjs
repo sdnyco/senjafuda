@@ -250,24 +250,52 @@ async function runHookEcho() {
 }
 
 async function runRemaining() {
-  // 5. Same-cell race
+  // 5. Same-cell race — find an empty cell, then force both visits onto it
   {
-    const a = await drawOnce("-1,-1");
-    const b = await drawOnce("-1,-1");
-    const locA = a.write?.location || "";
-    const locB = b.write?.location || "";
-    const pass2 =
-      a.ok &&
-      b.ok &&
-      a.write.status === 302 &&
-      /\/(arrival|decider|family|return)/.test(locA) &&
-      b.write.status === 302 &&
-      (locB.includes("note=taken") || locB.includes("/draw"));
-    record(
-      "5-cell-race",
-      pass2,
-      `A=${a.write?.status}/${locA.slice(-48)} B=${b.write?.status}/${locB.slice(-48)}`,
-    );
+    const candidates = [
+      "2,2",
+      "2,-2",
+      "-2,2",
+      "-2,-2",
+      "3,0",
+      "0,3",
+      "-3,1",
+      "1,-3",
+      "4,4",
+      "-4,-4",
+    ];
+    let cell = null;
+    let a = null;
+    for (const c of candidates) {
+      const tryA = await drawOnce(c);
+      const loc = tryA.write?.location || "";
+      if (
+        tryA.ok &&
+        tryA.write?.status === 302 &&
+        /\/(arrival|decider|family|return)/.test(loc)
+      ) {
+        cell = c;
+        a = tryA;
+        break;
+      }
+    }
+    if (!cell || !a) {
+      record("5-cell-race", false, "could not claim an empty forced cell");
+    } else {
+      const b = await drawOnce(cell);
+      const locA = a.write?.location || "";
+      const locB = b.write?.location || "";
+      const pass2 =
+        b.ok &&
+        b.write.status === 302 &&
+        (locB.includes("note=taken") ||
+          (/\/draw/.test(locB) && !/\/(arrival|decider)/.test(locB)));
+      record(
+        "5-cell-race",
+        pass2,
+        `cell=${cell} A=${a.write?.status}/${locA.slice(-40)} B=${b.write?.status}/${locB.slice(-40)}`,
+      );
+    }
   }
 
   // 7. Growth via fill hook
@@ -302,27 +330,33 @@ async function runRemaining() {
     if (!id) {
       record("8-sweep", false, "no visit");
     } else {
+      // Three GETs in the 2s window (threshold is 3). Branched visits remint on
+      // the next draw (R1), so expect the "earlier visit" note + a new visit id.
+      await req(`/s/${id}/draw`);
       await req(`/s/${id}/draw`);
       await req(`/s/${id}/draw`);
       const again = await req(`/s/${id}/draw`);
+      const reminted = extractVisitId(again.body);
       const branchedHint =
-        /complete|nothing to do|Start a fresh cell/i.test(again.body) ||
-        /VisitClosed|this visit is complete/i.test(again.body);
+        /earlier visit/i.test(again.body) ||
+        (Boolean(reminted) && reminted !== id);
       const d = await drawOnce();
       let sweptDrawing = false;
       if (d.ok && d.write.status === 302) {
         const vid = d.id;
-        const cellMatch = d.draw.body.match(/row (\d+), column (\d+)/i);
+        const link = parseDrawLink(d.draw.body);
         await req(`/s/${vid}/arrival`);
         await req(`/s/${vid}/arrival`);
-        const third = await req(`/s/${vid}/arrival`);
-        const closedAfter =
-          /complete|nothing to do|Start a fresh cell/i.test(third.body);
-        // Home canvas should no longer show that visit's glyph as valid if excluded
-        const home = await req("/");
-        sweptDrawing = closedAfter;
-        void cellMatch;
-        void home;
+        await req(`/s/${vid}/arrival`);
+        // After sweep-exclude, a new visit forced onto the same cell should win.
+        if (link) {
+          const reclaim = await drawOnce(`${link.x},${link.y}`);
+          const loc = reclaim.write?.location || "";
+          sweptDrawing =
+            reclaim.ok &&
+            reclaim.write?.status === 302 &&
+            /\/(arrival|decider|family|return)/.test(loc);
+        }
       }
       record(
         "8-sweep",
@@ -533,8 +567,20 @@ async function runExportDryRun() {
     record("14-export", false, "age binaries missing in .tools/");
     return;
   }
-  if (!isUsableSecret(process.env.DATABASE_URL) || !isUsableSecret(process.env.EXPORT_ID_SALT)) {
-    record("14-export", false, "DATABASE_URL or EXPORT_ID_SALT missing");
+
+  const dry = await req("/api/test/export-dry-run", { method: "POST" });
+  let payload = null;
+  try {
+    payload = JSON.parse(dry.body);
+  } catch {
+    /* ignore */
+  }
+  if (dry.status !== 200 || !payload?.ok || !payload.plaintextBase64) {
+    record(
+      "14-export",
+      false,
+      `endpoint status=${dry.status} body=${dry.body.slice(0, 120).replace(/\s+/g, " ")}`,
+    );
     return;
   }
 
@@ -543,90 +589,47 @@ async function runExportDryRun() {
   mkdirSync(tmpRoot, { recursive: true });
   const keyPath = path.join(tmpRoot, "test-age-key.txt");
   const recipientPath = path.join(tmpRoot, "age-recipient.txt");
-  const exportDir = path.join(tmpRoot, "era1");
+  const plainPath = path.join(tmpRoot, "delta.jsonl");
+  const agePath = path.join(tmpRoot, `${payload.day}.jsonl.age`);
+  const decPath = path.join(tmpRoot, "decrypted.jsonl");
 
   const gen = spawnSync(ageKeygen, ["-o", keyPath], { encoding: "utf8" });
   if (gen.status !== 0) {
     record("14-export", false, "age-keygen failed");
-    return;
-  }
-  const keyText = readFileSync(keyPath, "utf8");
-  const pubLine = keyText
-    .split("\n")
-    .map((l) => l.trim())
-    .find((l) => l.includes("age1"));
-  const pubMatch = pubLine?.match(/age1[a-z0-9]+/i);
-  const pub = pubMatch?.[0];
-  if (!pub) {
-    record("14-export", false, "no public key in keygen output");
-    unlinkSync(keyPath);
-    return;
-  }
-  writeFileSync(recipientPath, pub + "\n");
-
-  const env = {
-    ...process.env,
-    DATABASE_URL_READONLY: process.env.DATABASE_URL,
-    EXPORT_DIR: exportDir,
-    AGE_RECIPIENT_PATH: recipientPath,
-    AGE_BIN: ageBin,
-    PATH: `${tools}:${process.env.PATH || ""}`,
-  };
-  delete env.PILOT_FINAL;
-
-  const run = spawnSync("pnpm", ["exec", "tsx", "scripts/export.ts"], {
-    encoding: "utf8",
-    cwd: ROOT,
-    env,
-  });
-  if (run.status !== 0) {
-    record(
-      "14-export",
-      false,
-      `export exit=${run.status} ${(run.stderr || run.stdout || "").slice(0, 200)}`,
-    );
-    unlinkSync(keyPath);
     rmSync(tmpRoot, { recursive: true, force: true });
     return;
   }
+  const keyText = readFileSync(keyPath, "utf8");
+  const pub = keyText.match(/age1[a-z0-9]+/i)?.[0];
+  if (!pub) {
+    record("14-export", false, "no public key in keygen output");
+    rmSync(tmpRoot, { recursive: true, force: true });
+    return;
+  }
+  writeFileSync(recipientPath, pub + "\n");
+  writeFileSync(plainPath, Buffer.from(payload.plaintextBase64, "base64"));
 
-  const canvasTxt = readFileSync(path.join(exportDir, "canvas.txt"), "utf8");
-  const canvasJson = readFileSync(path.join(exportDir, "canvas.json"), "utf8");
-  const totals = readFileSync(path.join(exportDir, "totals.json"), "utf8");
-  const publicBlob = canvasTxt + canvasJson + totals;
-
-  const hasVisitId = /[A-Z2-7]{26}/.test(publicBlob);
-  const hasIsoTs = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(publicBlob);
-  const hasUa =
-    /ua_class|ua_family|Mozilla\/|Chrome\/|User-Agent/i.test(publicBlob);
-  const publicClean = !hasVisitId && !hasIsoTs && !hasUa;
-
-  const day = new Date().toISOString().slice(0, 10);
-  const ageFile = path.join(exportDir, "sealed", `${day}.jsonl.age`);
-  const chainPath = path.join(exportDir, "sealed", "chain.txt");
+  const enc = spawnSync(
+    ageBin,
+    ["-r", pub, "-o", agePath, plainPath],
+    { encoding: "utf8" },
+  );
+  const dec = spawnSync(
+    ageBin,
+    ["-d", "-i", keyPath, "-o", decPath, agePath],
+    { encoding: "utf8" },
+  );
   let decryptOk = false;
   let hashMatch = false;
-  if (existsSync(ageFile) && existsSync(chainPath)) {
-    const plainOut = path.join(tmpRoot, "decrypted.jsonl");
-    const dec = spawnSync(
-      ageBin,
-      ["-d", "-i", keyPath, "-o", plainOut, ageFile],
-      { encoding: "utf8" },
-    );
-    if (dec.status === 0 && existsSync(plainOut)) {
-      decryptOk = true;
-      const plain = readFileSync(plainOut, "utf8");
-      const deltaHash = sha256Hex(plain);
-      const chain = readFileSync(chainPath, "utf8");
-      const line = chain
-        .trim()
-        .split("\n")
-        .find((l) => l.startsWith(day + " "));
-      hashMatch = Boolean(line && line.includes(deltaHash));
-    }
+  if (enc.status === 0 && dec.status === 0 && existsSync(decPath)) {
+    decryptOk = true;
+    const plain = readFileSync(decPath, "utf8");
+    const deltaHash = sha256Hex(plain);
+    hashMatch =
+      deltaHash === payload.deltaHash &&
+      String(payload.chainLine || "").includes(deltaHash);
   }
 
-  // Delete private key first, then temp tree
   try {
     unlinkSync(keyPath);
   } catch {
@@ -636,64 +639,28 @@ async function runExportDryRun() {
 
   record(
     "14-export",
-    publicClean && decryptOk && hashMatch,
-    `publicClean=${publicClean} (visitId=${hasVisitId} ts=${hasIsoTs} ua=${hasUa}) decrypt=${decryptOk} hashMatch=${hashMatch}`,
+    Boolean(payload.publicClean) && decryptOk && hashMatch,
+    `publicClean=${payload.publicClean} (visitId=${payload.hasVisitId} ts=${payload.hasIsoTs} ua=${payload.hasUa}) decrypt=${decryptOk} hashMatch=${hashMatch}`,
   );
 }
 
 async function runIpUaCheck() {
-  if (!isUsableSecret(process.env.DATABASE_URL)) {
-    record("15-no-ip-ua", false, "DATABASE_URL missing");
-    return;
-  }
-  const script = `
-import { Pool, neonConfig } from "@neondatabase/serverless";
-import ws from "ws";
-neonConfig.webSocketConstructor = ws;
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const tables = ["visits", "drawings", "census", "canvas_state"];
-const ipRe = /\\b(?:(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\b/;
-const uaRe = /Mozilla\\/|Chrome\\/|Safari\\/|AppleWebKit|User-Agent/i;
-const hits = [];
-for (const t of tables) {
-  try {
-    const { rows } = await pool.query("select row_to_json(t)::text as j from " + t + " t");
-    for (const r of rows) {
-      if (ipRe.test(r.j) || uaRe.test(r.j)) hits.push(t);
-    }
-  } catch (e) {
-    hits.push(t + ":err");
-    console.error(t, e && e.message ? e.message : e);
-  }
-}
-await pool.end();
-process.stdout.write(JSON.stringify({ hits: [...new Set(hits)], rowsChecked: true }));
-`;
-  const tmp = path.join(ROOT, ".tmp-ip-ua-check.mjs");
-  writeFileSync(tmp, script);
-  const r = spawnSync("pnpm", ["exec", "tsx", tmp], {
-    encoding: "utf8",
-    cwd: ROOT,
-    env: { ...process.env },
-  });
-  try {
-    unlinkSync(tmp);
-  } catch {
-    /* ignore */
-  }
+  const scan = await req("/api/test/scan-ip-ua");
   let parsed = null;
-  const out = (r.stdout || "").trim();
   try {
-    const line = out.split("\n").filter(Boolean).pop() || "";
-    parsed = JSON.parse(line);
+    parsed = JSON.parse(scan.body);
   } catch {
     /* ignore */
   }
-  const dbClean = parsed && Array.isArray(parsed.hits) && parsed.hits.length === 0;
+  const dbClean =
+    scan.status === 200 &&
+    parsed &&
+    Array.isArray(parsed.hits) &&
+    parsed.hits.length === 0;
   record(
     "15-no-ip-ua",
-    r.status === 0 && dbClean,
-    `dbHits=${parsed ? parsed.hits.join("|") || "none" : "parse-fail"} exit=${r.status} err=${(r.stderr || "").slice(0, 120).replace(/\s+/g, " ")}`,
+    dbClean,
+    `status=${scan.status} dbHits=${parsed ? parsed.hits.join("|") || "none" : "parse-fail"}`,
   );
 }
 

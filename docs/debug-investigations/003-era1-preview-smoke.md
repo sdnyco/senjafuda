@@ -75,25 +75,29 @@ Both need Preview test hooks (`x-senjafuda-test` = `TEST_HOOK_SECRET`).
 **Next step:** confirm header forwarding (or use protection-bypass + raw `fetch`), then re-run 5 and 7 on a fresh Preview source (or after the daily source-cap window resets).
 
 
+
+
 ## Run C — fetch + protection bypass (remaining §13)
 
-**Date:** 2026-10-21T08:31:12.304Z
-**Preview deployment:** https://senjafuda-qpei29dec-sdnycos-projects.vercel.app
+**Date:** 2026-10-21T08:36:16.035Z
+**Preview deployment:** https://senjafuda-qcktnoh6j-sdnycos-projects.vercel.app
 **Method:** Node `fetch` with `x-vercel-protection-bypass` + `x-senjafuda-test` (no `vercel curl` for hooks)
 **Automated:** **6/10** checks in this run
 
 | Id | Result | Detail |
 |---|---|---|
 | 0-hook-echo | PASS | status=200 body={"ok":true,"hooks":true,"env":"preview"} |
-| 5-cell-race | FAIL | A=302/.vercel.app/s/UKNJJLRRPBURFSG5SM5T6CLW74/arrival B=302/.vercel.app/s/NMRLUA6OWY7APCXA2EMWSC5MVU/arrival |
-| 7-growth | PASS | status=200 created=12 canvas7=false |
-| 8-sweep | FAIL | pre-draw-sweep=false drawn-then-hits=true |
+| 5-cell-race | FAIL | A=500/ B=500/ |
+| 7-growth | PASS | status=200 created=12 frameSize=9 canvas7=true |
+| 8-sweep | FAIL | pre-draw-sweep=false drawn-then-swept=false |
 | 9-source-cap | PASS | reset=200 outcomes=1:ok,2:ok,3:ok,4:ok,5:ok,6:cap |
 | 10-decline | PASS | declineWrite=true refuseAfterDraw=true |
-| 11-form | PASS | status=302 loc=cts.vercel.app/s/M26BGI4KUSVFAGXQYM2RQ6B2FE/thanks |
+| 11-form | PASS | status=302 loc=cts.vercel.app/s/E67S4TYELZVAOEGFQESWIA3EOQ/thanks |
 | 12-census-correction | PASS | branchLt30=true supersedeGte30=true |
-| 14-export | FAIL | no public key in keygen output |
-| 15-no-ip-ua | FAIL | dbHits=parse-fail exit=1 |
+| 14-export | FAIL | export exit=1 DrizzleQueryError: Failed query: select "id", "frame_size", "updated_at" from "canvas_state" where "canvas_state"."id" = $1
+params: 1
+    at NeonPreparedQuery.queryWithCache (/Users/sidney/Desktop/Pro |
+| 15-no-ip-ua | FAIL | dbHits=visits:err/drawings:err/census:err/canvas_state:err exit=0 err=visits relation "visits" does not exist drawings relation "drawings" does not exist census relation "census" does not ex |
 
 
 ## Manual checks still required

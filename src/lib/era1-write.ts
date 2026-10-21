@@ -161,21 +161,36 @@ export async function writeDrawing(opts: {
           frameSize,
         };
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (/unique|duplicate/i.test(msg)) {
+        if (isUniqueViolation(err)) {
           return { ok: false, reason: "cell_taken", visit };
         }
         throw err;
       }
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (/unique|duplicate/i.test(msg)) {
+    if (isUniqueViolation(err)) {
       const visit = await getVisit(opts.visitId);
       return { ok: false, reason: "cell_taken", visit: visit ?? undefined };
     }
     throw err;
   }
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  const parts: string[] = [];
+  let cur: unknown = err;
+  for (let i = 0; i < 4 && cur; i++) {
+    if (cur instanceof Error) {
+      parts.push(cur.message);
+      const code = (cur as { code?: string }).code;
+      if (code === "23505") return true;
+      cur = (cur as { cause?: unknown }).cause;
+      continue;
+    }
+    parts.push(String(cur));
+    break;
+  }
+  return /unique|duplicate|23505/i.test(parts.join("\n"));
 }
 
 export type CensusWriteResult =

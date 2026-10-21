@@ -138,7 +138,9 @@ async function main() {
   }
 
   loadEra1Vocab();
-  const eraDir = path.join(process.cwd(), "data", "era1");
+  const eraDir =
+    process.env.EXPORT_DIR?.trim() ||
+    path.join(process.cwd(), "data", "era1");
   const sealedDir = path.join(eraDir, "sealed");
   mkdirSync(eraDir, { recursive: true });
   mkdirSync(sealedDir, { recursive: true });
@@ -268,7 +270,9 @@ async function main() {
   const plaintext = lines.join("\n") + (lines.length ? "\n" : "");
   const deltaHash = sha256Hex(plaintext);
 
-  const recipientPath = path.join(process.cwd(), "seal", "age-recipient.txt");
+  const recipientPath =
+    process.env.AGE_RECIPIENT_PATH?.trim() ||
+    path.join(process.cwd(), "seal", "age-recipient.txt");
   const ageOut = path.join(sealedDir, `${day}.jsonl.age`);
   if (!existsSync(recipientPath)) {
     console.warn(
@@ -278,8 +282,9 @@ async function main() {
     const recipient = readFileSync(recipientPath, "utf8").trim();
     const tmpPlain = path.join(sealedDir, `${day}.jsonl`);
     writeFileSync(tmpPlain, plaintext);
+    const ageBin = process.env.AGE_BIN?.trim() || "age";
     const age = spawnSync(
-      "age",
+      ageBin,
       ["-r", recipient, "-o", ageOut, tmpPlain],
       { encoding: "utf8" },
     );

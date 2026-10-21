@@ -11,6 +11,7 @@ import {
   checkDrawLimit,
   checkWriteLimit,
 } from "@/lib/rate-limit";
+import { skipSourceCaps } from "@/lib/test-hooks";
 import { redirectIfUnavailable } from "@/lib/upstash-response";
 import { isValidVisitIdFormat } from "@/lib/visit-id";
 import {
@@ -47,18 +48,24 @@ export async function POST(request: NextRequest) {
     return new NextResponse("Not found", { status: 404 });
   }
 
-  const writeLim = await checkWriteLimit();
-  const closed = redirectIfUnavailable(origin, writeLim);
-  if (closed) return closed;
-  if (!writeLim.success) {
-    await markVisitRateLimited(v).catch(() => {});
-    return redirectTo(`${origin}/rate-limited`);
-  }
-  const drawLim = await checkDrawLimit();
-  const closedDraw = redirectIfUnavailable(origin, drawLim);
-  if (closedDraw) return closedDraw;
-  if (!drawLim.success) {
-    return redirectTo(`${origin}/source-cap`);
+  const skipCaps = skipSourceCaps(
+    request.headers.get("x-senjafuda-test"),
+    request.headers.get("x-senjafuda-test-cap"),
+  );
+  if (!skipCaps) {
+    const writeLim = await checkWriteLimit();
+    const closed = redirectIfUnavailable(origin, writeLim);
+    if (closed) return closed;
+    if (!writeLim.success) {
+      await markVisitRateLimited(v).catch(() => {});
+      return redirectTo(`${origin}/rate-limited`);
+    }
+    const drawLim = await checkDrawLimit();
+    const closedDraw = redirectIfUnavailable(origin, drawLim);
+    if (closedDraw) return closedDraw;
+    if (!drawLim.success) {
+      return redirectTo(`${origin}/source-cap`);
+    }
   }
 
   const visit = await getVisit(v);

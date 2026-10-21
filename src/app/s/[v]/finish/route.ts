@@ -1,7 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { applySweepHit, finishVisit } from "@/lib/era1-write";
 import { verifySignature } from "@/lib/link-sign";
-import { checkWriteLimit } from "@/lib/rate-limit";
+import {
+  checkWriteLimit,
+  checkAndIncrGlobalMint,
+  checkMintSourceLimit,
+} from "@/lib/rate-limit";
+import { skipSourceCaps } from "@/lib/test-hooks";
 import { isValidVisitIdFormat } from "@/lib/visit-id";
 import {
   getVisit,
@@ -10,10 +15,6 @@ import {
   markVisitRateLimited,
   remintFrom,
 } from "@/lib/visits";
-import {
-  checkAndIncrGlobalMint,
-  checkMintSourceLimit,
-} from "@/lib/rate-limit";
 import {
   redirectIfUnavailable,
   redirectTemporarilyClosed,
@@ -38,12 +39,18 @@ export async function GET(request: NextRequest, ctx: Ctx) {
     return new NextResponse("Not found", { status: 404 });
   }
 
-  const writeLim = await checkWriteLimit();
-  const closed = redirectIfUnavailable(origin, writeLim);
-  if (closed) return closed;
-  if (!writeLim.success) {
-    await markVisitRateLimited(v).catch(() => {});
-    return redirectTo(`${origin}/rate-limited`);
+  const skipCaps = skipSourceCaps(
+    request.headers.get("x-senjafuda-test"),
+    request.headers.get("x-senjafuda-test-cap"),
+  );
+  if (!skipCaps) {
+    const writeLim = await checkWriteLimit();
+    const closed = redirectIfUnavailable(origin, writeLim);
+    if (closed) return closed;
+    if (!writeLim.success) {
+      await markVisitRateLimited(v).catch(() => {});
+      return redirectTo(`${origin}/rate-limited`);
+    }
   }
 
   let visit = await getVisit(v);

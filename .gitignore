@@ -42,3 +42,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+.tools/
+.tmp-export-dry-run/
+.tmp-ip-ua-check.mjs

@@ -5,7 +5,10 @@ import { verifySignature } from "@/lib/link-sign";
 import {
   checkDrawLimit,
   checkWriteLimit,
+  checkAndIncrGlobalMint,
+  checkMintSourceLimit,
 } from "@/lib/rate-limit";
+import { skipSourceCaps } from "@/lib/test-hooks";
 import { isValidVisitIdFormat } from "@/lib/visit-id";
 import { isValidPatternId } from "@/lib/era1-vocab";
 import {
@@ -15,10 +18,6 @@ import {
   markVisitRateLimited,
   remintFrom,
 } from "@/lib/visits";
-import {
-  checkAndIncrGlobalMint,
-  checkMintSourceLimit,
-} from "@/lib/rate-limit";
 import {
   redirectIfUnavailable,
   redirectTemporarilyClosed,
@@ -63,18 +62,24 @@ export async function GET(request: NextRequest, ctx: Ctx) {
     return htmlNote("<p>Nothing was recorded.</p>", 404);
   }
 
-  const writeLim = await checkWriteLimit();
-  const closed = redirectIfUnavailable(origin, writeLim);
-  if (closed) return closed;
-  if (!writeLim.success) {
-    await markVisitRateLimited(v).catch(() => {});
-    return redirectTo(`${origin}/rate-limited`);
-  }
-  const drawLim = await checkDrawLimit();
-  const closedDraw = redirectIfUnavailable(origin, drawLim);
-  if (closedDraw) return closedDraw;
-  if (!drawLim.success) {
-    return redirectTo(`${origin}/source-cap`);
+  const skipCaps = skipSourceCaps(
+    request.headers.get("x-senjafuda-test"),
+    request.headers.get("x-senjafuda-test-cap"),
+  );
+  if (!skipCaps) {
+    const writeLim = await checkWriteLimit();
+    const closed = redirectIfUnavailable(origin, writeLim);
+    if (closed) return closed;
+    if (!writeLim.success) {
+      await markVisitRateLimited(v).catch(() => {});
+      return redirectTo(`${origin}/rate-limited`);
+    }
+    const drawLim = await checkDrawLimit();
+    const closedDraw = redirectIfUnavailable(origin, drawLim);
+    if (closedDraw) return closedDraw;
+    if (!drawLim.success) {
+      return redirectTo(`${origin}/source-cap`);
+    }
   }
 
   let visit = await getVisit(v);

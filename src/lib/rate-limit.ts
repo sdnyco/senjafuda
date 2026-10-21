@@ -108,6 +108,36 @@ export async function checkSGetLimit(): Promise<RateLimitResult> {
   return limitKind("s_get");
 }
 
+/**
+ * Preview test helper: clear per-source draw / decline / write counters for
+ * this request's source key so §13.9 can start from a clean slate.
+ */
+export async function resetSourceCapCounters(): Promise<
+  RateLimitResult & { cleared: string[] }
+> {
+  const r = getRedis();
+  if (!r) return { success: true, bypassed: true, cleared: [] };
+  try {
+    const ip = await clientIp();
+    const key = rateLimitKey(ip);
+    const kinds: LimitKind[] = ["draw", "decline", "write"];
+    const cleared: string[] = [];
+    for (const kind of kinds) {
+      // @upstash/ratelimit sliding-window keys — wipe by prefix match
+      const prefix = `senjafuda:era1:${kind}`;
+      const pattern = `${prefix}:${key}*`;
+      const keys = await r.keys(pattern);
+      if (keys.length > 0) {
+        await r.del(...keys);
+        cleared.push(...keys);
+      }
+    }
+    return { success: true, bypassed: false, cleared };
+  } catch {
+    return { ...unavailableResult(), cleared: [] };
+  }
+}
+
 /** Global visit mint ceiling: 5 000 / UTC day (remints count). */
 export async function checkAndIncrGlobalMint(): Promise<RateLimitResult> {
   const r = getRedis();

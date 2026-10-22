@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 /** HEAD never performs writes. Short-circuit write routes with an empty body. */
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   if (request.method !== "HEAD") {
     return NextResponse.next();
   }

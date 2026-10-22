@@ -1,4 +1,4 @@
-export const UA_RULES_VERSION = 2;
+export const UA_RULES_VERSION = 3;
 
 export const UA_CLASSES = [
   "ai_crawler",
@@ -140,6 +140,25 @@ export function classifyUserAgent(uaHeader: string | null): {
  * literal product names (e.g. `Claude-User`) so robots.txt cannot drift.
  * Exact-match rules contribute their exact string (e.g. `Google`).
  */
+/**
+ * Label-only (§8): implausibly old mobile OS majors in 2026.
+ * Never blocks; versioned with UA_RULES_VERSION.
+ */
+export function isUaSuspect(uaHeader: string | null): boolean {
+  const ua = uaHeader ?? "";
+  const ios = ua.match(/\b(?:iPhone|iPad|iPod).*?(?:OS|CPU(?: iPhone)? OS) (\d+)[._]/i);
+  if (ios) {
+    const major = Number(ios[1]);
+    if (Number.isFinite(major) && major < 15) return true;
+  }
+  const android = ua.match(/\bAndroid (\d+)(?:[.\s]|$)/i);
+  if (android) {
+    const major = Number(android[1]);
+    if (Number.isFinite(major) && major < 10) return true;
+  }
+  return false;
+}
+
 export function aiUserFetchRobotsUserAgents(): string[] {
   const agents: string[] = [];
   for (const rule of RULES) {

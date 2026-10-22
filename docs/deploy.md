@@ -15,6 +15,9 @@
 | `UPSTASH_REDIS_REST_URL` | Rate limiting + fast-sweep (**required** when `VERCEL_ENV=production`) |
 | `UPSTASH_REDIS_REST_TOKEN` | Rate limiting + fast-sweep (**required** when `VERCEL_ENV=production`) |
 | `IP_HASH_PEPPER` | Long random secret; used only to hash IPs for daily rate-limit keys (**required** in production) |
+| `LINK_SIGNING_SECRET` | HMAC secret for signed write links (**required** in production; different value on Preview). `openssl rand -hex 32` |
+| `EXPORT_ID_SALT` | Salt for `public_id` (**required** in production; must match the Actions secret on Production). Never rotate |
+| `TEST_HOOK_SECRET` | Preview-only smoke-test hooks; never set in Production |
 | `GITHUB_DATA_URL` | Full URL to this repo’s `/data` folder on GitHub (used by `GET /data`) |
 | `SITE_ORIGIN` | Canonical public origin: `https://senjafuda.org` (**required** in production; also a GitHub Actions secret for export / IA) |
 | `PRODUCTION_DATABASE_URL` | Optional on Preview: set to the production `DATABASE_URL` so a mis-pointed preview fails the build / runtime instead of writing to the permanent record |
@@ -57,6 +60,8 @@ GRANT USAGE ON SCHEMA public TO senjafuda_export;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO senjafuda_export;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO senjafuda_export;
 ```
+
+Era-1 migration `0002_era1.sql` grants `SELECT` on `visits`, `drawings`, `census`, and `canvas_state` to `senjafuda_export` when that role exists (idempotent). No manual GRANT step is needed after deploy if the role was already created as above.
 
 Build a connection string for that role and store it as the GitHub Actions secret `DATABASE_URL_READONLY`.
 

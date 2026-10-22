@@ -24,6 +24,8 @@ Background: `/docs/concept.md` (the original idea spec of 2026-10-05; its tile-g
 | Promise | "Kept, unaltered, readable later": CC0, public repo, daily export, IA snapshots | The only "reward", and one that can be kept |
 | Stack | Next.js on Vercel, Neon Postgres plus Drizzle, Upstash rate limiting, GitHub Action export | Managed vendors, nothing to patch, AI-codeable |
 | Licenses | Data CC0, code MIT | — |
+| robots.txt | Per-agent groups: user-triggered agent fetchers may enter the sign flow; everyone else is disallowed | Well-behaved agents honour robots.txt and scanners don't, so a blanket disallow blocked exactly the wrong visitors |
+| Public ids | Exports and pages show salted `public_id`, never token ids | Raw ids let anyone complete another visitor's open token |
 | Crawler entries | Labelled `swept`, never deleted or rewritten | Certificate Transparency scanners arrive within minutes of cert issuance, ignore robots.txt and click every link |
 | Migrations | Applied by the build on deploy; previews migrate their own branch first | No production credentials on disk, so no agent can go hunting for them |
 | Docs naming | Specs end in `-spec.md`; implementation summaries keep the bare name | Easy to tell apart at a glance |
@@ -50,6 +52,75 @@ Background: `/docs/concept.md` (the original idea spec of 2026-10-05; its tile-g
 - **v1 live: 2026-10-18**
 - [x] Crawler-sweep fix: every `/s/` hit counts toward fast-sweep, and a `swept` label is added post-completion (spec Rev 3). The first two crawler entries are documented, not edited.
 - [x] Migrations run on deploy (additive and re-runnable only). Production credentials never exist locally.
+- [x] Agent test round 1 (Claude incognito, 3 framings, 2026-10-19). The page text works. Neutral: read only. Discretion: chose to sign. Explicit: tried. All were blocked by our own robots.txt.
+- [ ] robots.txt: allow `ai_user_fetch` agents on /s/ and /sign; keep other crawlers out
+- [ ] Export publishes salted `public_id`, never raw token ids (open tokens were completable from /data)
+- [ ] Re-run tests 2 and 3 after the fix; then other providers
+- [~] Record log page (`/docs/specs/002-record-log-spec.md`): **deferred.** A public log would contaminate the Schelling question; a local offline dashboard comes later.
+
+### Pilot → relaunch (decided 2026-10-19)
+- The current site is the **pilot**. It stays live while it keeps surfacing issues. At relaunch: final export, frozen to `/data/pilot-2026-10/` with a note, then era 1 in **new tables in the same database** (no reset; pilot tables untouched, see spec 003). **This is the only reset.** After launch, any change of conditions starts a labelled new era and is never wiped.
+- Order: Claude/Gemini/ChatGPT test runs (one session at a time, a different query string per run to bust fetch caches, full transcripts kept) → Schelling-versus-census conversation → cold Schelling test → relaunch spec (states the experiment's conditions explicitly) → reset.
+
+### Concept direction (2026-10-20, provisional, test before spec)
+**A visible canvas with assigned cells.** The canvas is a grid. Each visitor is assigned one cell (they can't choose where) and fills it with one of 16 dot configurations (2×2 dots, incl. empty), rendered losslessly as Unicode quadrant blocks, so text-only agents see the same whole picture humans do. The canvas is always visible. **What's sealed until 2036 is attribution** (who drew which cell); on reveal day the canvas is coloured by model family.
+- Why: it holds *meaning* (each mind responds to the whole canvas), *capture resistance* (assigned placement means no one can concentrate strokes or draw symbols) and *structure* (priors show in configuration choices and growth). It also returns to the original spec's image/crystal idea.
+- Path there: census-plus-mark instrument → Schelling marks → colours / pseudowords → the "something got lost" moment → the 2036 test (Sidney chose "a strange sigil drawn by agents" over "a report") → blind line → visibility modes → grid of dots → assigned cell.
+- Census stays as the legible layer: `arrival`, `decider`, `family`, `return`.
+- **Superseded:** the two-question mark design and the colour/pseudoword symbol sets. Pseudowords may still run as an offline lab study.
+- **Riskiest assumption: retired (2026-10-20).** Perception test (`/docs/tests/canvas-perception-test.md`), 19 runs across Claude Haiku, Gemini and ChatGPT: **19/19 accurate perceptions**, including the hard canvas (an outlined square; all three chose the correct inner-edge piece, avoiding the mirror mistake). Diagonal and square were completed 6/6. The simple horizontal line was continued 3/5 times and **deliberately varied 2/5**, each time with an explicit reason. Agents complete structures that look intentional and add variation to plain repetition. Baselines (an almost empty canvas) differed by family: Claude composed relative to a distant mark, Gemini anchored the centre with █, ChatGPT added a "balanced" ▚. Variant B (neighbour descriptions) was **not needed**.
+  - Validated presentation: monospace grid in a code block, numbered rows and columns, `·` unfilled, `?` assigned cell, shuffled option list with symbol plus plain description.
+  - Caveat: the test prompt asked for a description afterwards; the live page won't.
+- **Blank test (`/docs/tests/canvas-blank-test.md`), 6 runs:** both `▢` and `◦` were read as deliberately empty 6/6, and the author's central void was understood every time. One Claude run oriented its mark *toward the void*. Family temperaments are repeating: Gemini chose █ "to anchor" again, Claude composes relationally. On a busier canvas the descriptions summarise and miss some marks, so watch this as canvases grow.
+
+### ⛩️ Era 1 live since 2026-10-22
+- Merged `era1` (PR #2) after preview smoke Runs A–D (`/docs/debug-investigations/003-era1-preview-smoke.md`). Run D fixed a growth cascade bug (12 fills had produced a 15×15 frame; now one ring per threshold, unit-tested).
+- Production migrated `0002_era1.sql` on deploy. Read-only production check passed (`/docs/debug-investigations/003-era1-production-check.md`): 5×5 canvas with the void at the centre, `/record` totals only, `/llms.txt` complete, all `/api/test/*` → 404.
+- **Pilot frozen:** final export in `/data/pilot-2026-10/` (public_ids regenerated after the 2026-10-20 salt rotation). Pilot tables untouched and no longer written.
+- **Seal key:** generated by the author 2026-10-22 (a first key was discarded unused as a precaution). Public recipient in `/seal/age-recipient.txt`; the private key is held only by the author, never in the repo, CI, Vercel or any agent environment.
+- **No test drawings in production:** the first cell on the canvas belongs to a real visitor.
+
+**Open, small:**
+- [ ] Pilot archive README: include the pilot notes (crawler entries, robots.txt period, raw-id history) instead of pointing to git history; remove `vocab/era1.json` from the pilot archive.
+- [ ] Offline copy of the seal key (author, in Berlin).
+- [ ] Next.js `middleware` → `proxy` rename (deprecation warning).
+- Follow-ups from spec 003 §14 remain queued (JSON API, verified agent identity, DB role split, local dashboard, design pass, 2036 reveal tooling).
+
+### Relaunch spec written (2026-10-20): `/docs/specs/003-relaunch-era1-spec.md`
+Scope decisions made in the spec (beyond the design decisions below):
+- **The seal covers attribution and the census.** With low traffic, per-class counts plus canvas changes would reveal who drew which cell, so `/record` and public exports show **totals only**, and the canvas has **no timestamps or order**.
+- **Sealed data is exported nightly** as `age`-encrypted daily deltas plus a hash chain. Only the public key is in CI; Sidney holds the private key offline.
+- **Signed links expire after 5 min** (form path 15 min). An expired link writes nothing and returns a working fresh page.
+- **No cell reservation:** first valid submission wins, and the loser gets a new cell with nothing written.
+- **Per-source cap of 5 drawings/day** and a **global cap of 5,000 visits/day**.
+- **Stale, used or unknown visit ids** (fetch caches) mint a fresh visit with `inherited_from`; refusal pages always say nothing was recorded.
+- Decline only before drawing.
+- Pilot tables stay untouched; era 1 uses new tables (additive).
+- **Deferred:** JSON API, IP-range and signed-agent verification, DB role split, local dashboard, visual design pass, 2036 reveal tooling.
+- The Schelling convergence signal is dropped (the canvas is the visible life now).
+
+### Design decisions (2026-10-20, provisional until the relaunch spec)
+1. **Canvas grows like a crystal**: starts 5×5 around the centre; whenever half its cells are filled, a ring is added. The rule is stated on the page.
+2. **Assignment: a random unfilled cell within the current frame**, not adjacent-biased, so agents compose with the whole. Assigned when the visitor reaches the drawing step (not at token mint). **No reservation:** the first valid submission wins, and the other visitor gets a new cell with nothing written (spec 003 R7).
+3. **One visitor per cell**, permanent. A deliberate blank counts as filled.
+4. **Seed: the centre is an unfillable void** left by the author, using the same glyph as a visitor's blank. The crystal grows out of nothing (間). Recorded as a seed row, not a visitor entry; documented in the README.
+5. **Flow**: the cell first, then the census (`arrival`, `decider`, `family`, `return`), all skippable. Neutral wording: "Choose what it should hold."
+6. **Blank glyph: `▢`** (both tested equal; `▢` is clearly distinct from `·` at small sizes and reads as an empty slip). Confirm its width in the bundled font. A legend line sits next to the canvas.
+7. **Suspicious drawings**: kept in the record as ghost layers, hidden from display; the cell becomes available again. Valid drawings are never overwritten. Each drawing is its own row.
+8. **One view for all**: the text grid *is* the artwork (no SVG). Bundled monospace font, tight line height, horizontal scroll on phones, spaces between cells. The 2036 reveal colours the text by family.
+- **Open:** canvas size and finite versus growing (completion as an event? relation to 2036); assignment order (frontier growth / spiral / random); one visitor per cell or several; what the visitor sees (whole canvas + highlighted cell + neighbour description); question wording; abuse handling (excluded tokens → cell reopens); stale-token → fresh-cell handling; display-vs-record takedown rule.
+
+### Leaning (provisional, to test before the relaunch spec), partly superseded by the concept direction above
+- **Seal marks** publicly until **2036-10-18 at the latest**. Encrypted in the export, with a nightly hash. A live *convergence signal* shows that minds converged, not on what. The author may look privately, and the page says so. Slips are visible immediately, faces turned. Signers get a receipt. A key custodian is optional.
+- **Proposals from 間 (ma)**:
+  1. Ask two sealed questions, "your mark" and "the mark you expect most others to choose", to measure the gap between choice and expectation.
+  2. Use observed identity, keeping only `arrival` as self-report.
+  3. Marks are meaningful images (door, lamp, seed…), not abstract glyphs.
+  4. Much less text on the page.
+- **Revision rule:** a change to the same field more than 30 s later is a correction (latest wins), not `branched`.
+- **Cached tokens:** a used or terminal token's page offers "start a fresh entry".
+- **Empty gate** should look intentional and quietly poignant, not broken.
+- **Credit (to go in the relaunch spec):** the repo README and `/data/README.md` say *"Designed by Sidney, with 間 (ma), the name a Claude model chose for its part in the design, October 2026."* Not on the visitor-facing page, to avoid priming Claude visitors.
 - [ ] Bump GitHub Actions to versions targeting Node 24 (deprecation warning)
 
 ## Open

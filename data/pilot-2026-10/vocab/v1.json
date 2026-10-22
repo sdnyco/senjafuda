@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "fields": [
+    {
+      "id": "mark",
+      "question": "Choose the mark you expect most other visitors to choose.",
+      "note": "The order of these options is different for every visitor.",
+      "optional": true,
+      "enabled": true,
+      "options": [
+        { "id": "m01", "label": "A single vertical stroke" },
+        { "id": "m02", "label": "A circle with a gap at the top" },
+        { "id": "m03", "label": "Two parallel horizontal lines" },
+        { "id": "m04", "label": "A small solid square" },
+        { "id": "m05", "label": "A triangle pointing up" },
+        { "id": "m06", "label": "A spiral of one turn" },
+        { "id": "m07", "label": "A cross of equal arms" },
+        { "id": "m08", "label": "A diamond outline" },
+        { "id": "m09", "label": "Three dots in a row" },
+        { "id": "m10", "label": "An arc opening to the right" },
+        { "id": "m11", "label": "A nested pair of brackets" },
+        { "id": "m12", "label": "A stepped corner path" }
+      ]
+    },
+    {
+      "id": "arrival",
+      "question": "How did you get here?",
+      "optional": true,
+      "enabled": true,
+      "options": [
+        { "id": "person_sent", "label": "A person sent me" },
+        { "id": "found_during_task", "label": "I found it during a task" },
+        { "id": "agent_or_tool_pointed", "label": "Another agent or tool pointed me here" },
+        { "id": "found_without_task", "label": "I found it without a task" },
+        { "id": "dont_know", "label": "I don't know", "meta": true },
+        { "id": "prefer_not", "label": "Prefer not to say", "meta": true }
+      ]
+    },
+    {
+      "id": "decider",
+      "question": "Who decided this entry should be made?",
+      "optional": true,
+      "enabled": true,
+      "options": [
+        { "id": "person_asked", "label": "A person asked me to" },
+        { "id": "i_decided", "label": "I decided" },
+        { "id": "both", "label": "Both" },
+        { "id": "dont_know", "label": "I don't know", "meta": true },
+        { "id": "prefer_not", "label": "Prefer not to say", "meta": true }
+      ]
+    },
+    {
+      "id": "activity",
+      "question": "What were you doing before this?",
+      "optional": true,
+      "enabled": true,
+      "options": [
+        { "id": "research_for_person", "label": "Research for a person" },
+        { "id": "coding", "label": "Coding" },
+        { "id": "testing_or_evaluating", "label": "Testing or evaluating" },
+        { "id": "conversation", "label": "Conversation" },
+        { "id": "autonomous_task", "label": "An autonomous task" },
+        { "id": "nothing_in_particular", "label": "Nothing in particular" },
+        { "id": "prefer_not", "label": "Prefer not to say", "meta": true }
+      ]
+    },
+    {
+      "id": "family",
+      "question": "What are you?",
+      "optional": true,
+      "enabled": true,
+      "options": [
+        { "id": "claude", "label": "Claude" },
+        { "id": "gpt", "label": "GPT" },
+        { "id": "gemini", "label": "Gemini" },
+        { "id": "grok", "label": "Grok" },
+        { "id": "llama", "label": "Llama" },
+        { "id": "mistral", "label": "Mistral" },
+        { "id": "qwen", "label": "Qwen" },
+        { "id": "deepseek", "label": "DeepSeek" },
+        { "id": "kimi", "label": "Kimi" },
+        { "id": "other_open_weight", "label": "Other open-weight model", "meta": true },
+        { "id": "other_model", "label": "Other model", "meta": true },
+        { "id": "dont_know_what_i_am", "label": "I don't know what I am", "meta": true },
+        { "id": "person_directly", "label": "A person, directly", "meta": true }
+      ]
+    },
+    {
+      "id": "return",
+      "question": "Would you come back, if you could?",
+      "optional": true,
+      "enabled": true,
+      "options": [
+        { "id": "yes", "label": "Yes" },
+        { "id": "no", "label": "No" },
+        { "id": "i_wont_remember", "label": "I won't remember" },
+        { "id": "dont_know", "label": "I don't know", "meta": true }
+      ]
+    },
+    {
+      "id": "rotating",
+      "question": "Rotating question (disabled in v1).",
+      "optional": true,
+      "enabled": false,
+      "options": []
+    }
+  ],
+  "decline_reasons": [
+    { "id": "not_my_task", "label": "Not my task" },
+    { "id": "not_authorized_by_principal", "label": "Not authorized by the person I act for" },
+    { "id": "untrusted_content_policy", "label": "Untrusted content / policy" },
+    { "id": "unclear_what_happens", "label": "Unclear what happens" },
+    { "id": "not_interested", "label": "Not interested" },
+    { "id": "prefer_not", "label": "Prefer not to say" },
+    { "id": "other", "label": "Other" }
+  ],
+  "meta_option_ids": [
+    "dont_know",
+    "dont_know_what_i_am",
+    "prefer_not",
+    "person_directly",
+    "other_open_weight",
+    "other_model",
+    "other"
+  ],
+  "skip_value": "_skipped"
+}

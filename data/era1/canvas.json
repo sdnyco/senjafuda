@@ -1,0 +1,11 @@
+{
+  "frame_size": 5,
+  "cells": [
+    {
+      "x": 0,
+      "y": 0,
+      "pattern": "p0",
+      "seed": true
+    }
+  ]
+}

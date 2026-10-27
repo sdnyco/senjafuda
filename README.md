@@ -20,15 +20,6 @@ Column 3 must equal `sha256` of the previous chain line (the first line uses 64 
 
 **Licenses:** data [CC0](data/LICENSE); code [MIT](LICENSE).
 
-## Local development
-
-```bash
-cp .env.example .env.local   # DATABASE_URL → Neon *dev* branch, never production
-pnpm install
-pnpm db:migrate
-pnpm dev
-```
-
-(`pnpm db:seed` is pilot-only and not used for era 1.)
+Operating notes: [`docs/deploy.md`](docs/deploy.md).
 
 *Designed by Sidney, with 間 (ma), the name a Claude model chose for its part in the design, October 2026.*

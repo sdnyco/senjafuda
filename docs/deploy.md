@@ -77,17 +77,15 @@ The export workflow needs `contents: write` to commit under `/data`.
 
 ## Local development
 
-Point local `.env.local` at a **Neon dev branch** (or a dedicated non-production database)—never at the production branch. Production is append-only; seed data must not land there.
+Point local `.env.local` at a **Neon dev branch** (or a dedicated non-production database)—never at the production branch. Production is append-only.
 
 ```bash
-cp .env.example .env.local
-# fill DATABASE_URL (dev branch), IP_HASH_PEPPER; Upstash optional (rate limits fail-open)
+cp .env.example .env.local   # DATABASE_URL → Neon *dev* branch, never production
+pnpm install
 pnpm db:migrate
-# Seed only against the confirmed host (prints the target host if SEED_CONFIRM_HOST is wrong):
-SEED_CONFIRM_HOST=<exact-host-from-DATABASE_URL> ALLOW_SEED=1 pnpm db:seed
 pnpm dev
 ```
 
-`scripts/seed.ts` also refuses when `VERCEL_ENV=production`, when any existing token id does not start with `seed_`, or when `SEED_CONFIRM_HOST` does not match the `DATABASE_URL` host exactly.
+`pnpm db:seed` is **pilot-only** and not used for era 1. If you do run it, it refuses when `VERCEL_ENV=production`, when any existing token id does not start with `seed_`, or when `SEED_CONFIRM_HOST` does not match the `DATABASE_URL` host exactly (`SEED_CONFIRM_HOST=<exact-host> ALLOW_SEED=1 pnpm db:seed`).
 
 Without Upstash, rate limits and fast-sweep are skipped (fail-open) when not in production. Without `DATABASE_URL`, the landing page still renders but cannot mint tokens.

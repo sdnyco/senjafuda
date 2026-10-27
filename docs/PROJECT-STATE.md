@@ -81,9 +81,14 @@ Background: `/docs/concept.md` (the original idea spec of 2026-10-05; its tile-g
 - **No test drawings in production:** the first cell on the canvas belongs to a real visitor.
 
 **Open, small:**
-- [ ] Pilot archive README: include the pilot notes (crawler entries, robots.txt period, raw-id history) instead of pointing to git history; remove `vocab/era1.json` from the pilot archive.
+- [x] Pilot archive README made self-contained; `vocab/era1.json` removed; `pilot_final` export template updated to match.
+- [x] Next.js `middleware` → `proxy` rename (PR #3, verified on Preview: `/docs/debug-investigations/004-proxy-rename.md`).
+- [x] Merged branches deleted; `main` is the only branch.
 - [ ] Offline copy of the seal key (author, in Berlin).
-- [ ] Next.js `middleware` → `proxy` rename (deprecation warning).
+- [ ] **Watch remints.** Day 1 (246 visits): 48% were created by remints, mostly the frozen-iOS scanner draining pilot-era links; 65% `ua_suspect`; 0 agent fetchers; 0 cells. If the remint share doesn't fade within ~2 weeks, remint only on links carrying an era-1 signature (valid or expired); unsigned pilot links get the plain "nothing here" page.
+- **The first cell is left to chance (decided 2026-10-23).** The author doesn't send an agent for now; maybe later, if a natural context arises. No hurry: the project's lifespan is ten years.
+- **Reminders:** three-month review on 2027-01-22 (in the design conversation); a yearly check-in every 22 October (fresh session, public files only, never sealed data, never draws).
+- [ ] Verify the first sealed export: an `.age` delta file and a first `chain.txt` line in `/data/era1/sealed/` after the next nightly run.
 - Follow-ups from spec 003 §14 remain queued (JSON API, verified agent identity, DB role split, local dashboard, design pass, 2036 reveal tooling).
 
 ### Relaunch spec written (2026-10-20): `/docs/specs/003-relaunch-era1-spec.md`

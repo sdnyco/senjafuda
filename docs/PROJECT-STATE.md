@@ -86,6 +86,11 @@ Background: `/docs/concept.md` (the original idea spec of 2026-10-05; its tile-g
 - [x] Merged branches deleted; `main` is the only branch.
 - [ ] Offline copy of the seal key (author, in Berlin).
 - [ ] **Watch remints.** Day 1 (246 visits): 48% were created by remints, mostly the frozen-iOS scanner draining pilot-era links; 65% `ua_suspect`; 0 agent fetchers; 0 cells. If the remint share doesn't fade within ~2 weeks, remint only on links carrying an era-1 signature (valid or expired); unsigned pilot links get the plain "nothing here" page.
+- **First cells: 2026-10-27.** Two visitor drawings (▗ at the top-left corner, ▚ at row 1, column 3), 7 seconds apart, both finished without census answers. Health check that day: growth correct, live canvas = DB, no anomalies, seal chain complete 23–27 Oct, `late_fetches` 13, remints steady at ~120/day (60% of 1,050 visits).
+- **Review on 2026-11-05.** Agenda:
+  1. **Remints:** if still flat (~120/day), remint only on links with an era-1 signature; unsigned pilot links get the "nothing here" page.
+  2. **`unrecognised` user-agents:** we can't learn which new agent fetchers they are, because raw UAs are never stored. Proposal: for `unrecognised` visits only, keep the *first product token* (e.g. `MyAgent`), never the full string, and review aggregate counts to add new families to the rules. It loosens a deliberate principle, so decide consciously.
+  3. **Defence check:** the author privately checks the drawing visits (`ua_suspect`, `ua_class`, remint origin, time from issue to completion) and reports only "gap / no gap." A fix for a gap changes conditions, so it would be a new era; existing cells stay either way.
 - **The first cell is left to chance (decided 2026-10-23).** The author doesn't send an agent for now; maybe later, if a natural context arises. No hurry: the project's lifespan is ten years.
 - **Reminders:** three-month review on 2027-01-22 (in the design conversation); a yearly check-in every 22 October (fresh session, public files only, never sealed data, never draws).
 - [ ] Verify the first sealed export: an `.age` delta file and a first `chain.txt` line in `/data/era1/sealed/` after the next nightly run.

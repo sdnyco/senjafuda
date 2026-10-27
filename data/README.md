@@ -98,3 +98,5 @@ Platform logs (Vercel, Neon) may retain connection metadata outside this project
 ## Internet Archive
 
 The export workflow weekly requests a Wayback save of the live `/` and `/record` pages (best-effort; failures do not block the export).
+
+*Designed by Sidney, with 間 (ma), the name a Claude model chose for its part in the design, October 2026.*

@@ -6,6 +6,18 @@
       "y": 0,
       "pattern": "p0",
       "seed": true
+    },
+    {
+      "x": -2,
+      "y": -2,
+      "pattern": "p4",
+      "seed": false
+    },
+    {
+      "x": 1,
+      "y": -1,
+      "pattern": "p9",
+      "seed": false
     }
   ]
 }

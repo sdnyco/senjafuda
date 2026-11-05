@@ -3,7 +3,7 @@ import { Shell } from "@/components/Shell";
 import {
   NothingRecorded,
   RateLimitedPage,
-  VisitClosed,
+  StaleVisitPage,
 } from "@/components/StatusPages";
 import { applySweepHit } from "@/lib/era1-write";
 import { loadEra1Vocab } from "@/lib/era1-vocab";
@@ -35,25 +35,20 @@ export default async function DeclinePage({ params }: Props) {
   pageIfUnavailable(sGet);
   if (!sGet.success) return <RateLimitedPage />;
 
+  const h = await headers();
+  const hooks = testHooksAllowed(h.get("x-senjafuda-test"));
+  const ttl = hooks
+    ? parseTtlOverride(h.get("x-senjafuda-test-ttl"))
+    : undefined;
+
   const visit = await getVisit(v);
-  if (!visit) {
-    return (
-      <NothingRecorded>
-        <p>This visit was not found. Nothing was recorded from this link.</p>
-      </NothingRecorded>
-    );
+  // Spec 004 R1.9: any unusable / unknown → same single-fresh stale page.
+  if (!visit || (await isVisitUnusable(visit))) {
+    const freshN = signFreshLink({ visitId: visit?.id ?? v, ttlSec: ttl });
+    return <StaleVisitPage visitId={visit?.id ?? v} freshN={freshN} />;
   }
 
-  if (
-    visit.status === "signed" ||
-    visit.status === "declined" ||
-    visit.status === "branched"
-  ) {
-    const fresh = signFreshLink({ visitId: visit.id });
-    return <VisitClosed freshHref={`/s/${visit.id}/fresh?n=${fresh}`} />;
-  }
-
-  if (visit.status !== "issued" || (await isVisitUnusable(visit))) {
+  if (visit.status !== "issued") {
     return (
       <NothingRecorded>
         <p>
@@ -74,15 +69,10 @@ export default async function DeclinePage({ params }: Props) {
     redirectTemporarilyClosedPage();
   }
   if (sweep === "branched" || sweep === "swept") {
-    const fresh = signFreshLink({ visitId: visit.id });
-    return <VisitClosed freshHref={`/s/${visit.id}/fresh?n=${fresh}`} />;
+    const freshN = signFreshLink({ visitId: visit.id, ttlSec: ttl });
+    return <StaleVisitPage visitId={visit.id} freshN={freshN} />;
   }
 
-  const h = await headers();
-  const hooks = testHooksAllowed(h.get("x-senjafuda-test"));
-  const ttl = hooks
-    ? parseTtlOverride(h.get("x-senjafuda-test-ttl"))
-    : undefined;
   const vocab = loadEra1Vocab();
 
   return (

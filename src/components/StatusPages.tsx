@@ -24,6 +24,50 @@ export function NothingRecorded({
   );
 }
 
+/**
+ * Spec 004: unusable / stale visit surface.
+ * Exactly one signed `/fresh` link; no Home/`/` (minting). Shell footer
+ * keeps non-minting `/record`, `/llms.txt`, `/data`.
+ */
+export function StaleVisitPage({
+  visitId,
+  freshN,
+}: {
+  visitId: string;
+  freshN: string;
+}) {
+  return (
+    <Shell>
+      <h1>Nothing was recorded</h1>
+      <p>
+        This link belongs to an earlier visit, so nothing was recorded.
+      </p>
+      <p>
+        <a
+          href={`/s/${visitId}/fresh?n=${encodeURIComponent(freshN)}`}
+          rel="nofollow"
+        >
+          → Start a fresh cell
+        </a>
+      </p>
+    </Shell>
+  );
+}
+
+/** Spec 004: expired/invalid `fresh` — HTML dead end, no signed links, no `/`. */
+export function FreshLinkExpiredPage() {
+  return (
+    <Shell>
+      <h1>Nothing was recorded</h1>
+      <p>This link has expired, so nothing was recorded.</p>
+      <p>
+        <a href="/record">About the record</a>
+      </p>
+    </Shell>
+  );
+}
+
+/** @deprecated Use StaleVisitPage (spec 004). */
 export function VisitClosed({
   freshHref,
 }: {
@@ -33,21 +77,16 @@ export function VisitClosed({
     <Shell>
       <h1>Nothing was recorded</h1>
       <p>
-        This visit is complete; there is nothing to do here, and nothing was
-        recorded from this link.
+        This link belongs to an earlier visit, so nothing was recorded.
       </p>
       <p>
         {freshHref ? (
-          <>
-            <a href={freshHref} rel="nofollow">
-              → Start a fresh cell
-            </a>
-            {" · "}
-          </>
-        ) : null}
-        <a href="/">Home</a>
-        {" · "}
-        <a href="/record">About the record</a>
+          <a href={freshHref} rel="nofollow">
+            → Start a fresh cell
+          </a>
+        ) : (
+          <a href="/record">About the record</a>
+        )}
       </p>
     </Shell>
   );

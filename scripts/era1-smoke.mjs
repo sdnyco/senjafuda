@@ -157,6 +157,59 @@ function parseDrawLink(html) {
   };
 }
 
+function parseFreshLink(html) {
+  const re = /\/s\/([A-Z2-7]{26})\/fresh\?n=([^"'&\s]+)/;
+  const m = html.match(re);
+  if (!m) return null;
+  return { visitId: m[1], n: decodeURIComponent(m[2]) };
+}
+
+/** href values that look like HMAC query links (`?n=`). */
+function signedHrefs(html) {
+  const out = [];
+  const re = /href="([^"]*\?n=[^"]+)"/g;
+  let m;
+  while ((m = re.exec(html))) out.push(m[1].replace(/&amp;/g, "&"));
+  return out;
+}
+
+function allHrefs(html) {
+  const out = [];
+  const re = /href="([^"]+)"/g;
+  let m;
+  while ((m = re.exec(html))) out.push(m[1].replace(/&amp;/g, "&"));
+  return out;
+}
+
+function patternLinkCount(html) {
+  return (html.match(/\/draw\/p\d+\?/g) || []).length;
+}
+
+function isStalePage(html) {
+  return (
+    /earlier visit/i.test(html) &&
+    /Start a fresh cell/i.test(html) &&
+    patternLinkCount(html) === 0 &&
+    signedHrefs(html).length === 1 &&
+    Boolean(parseFreshLink(html)) &&
+    !/\shref="\/"|href="\/\?/i.test(html)
+  );
+}
+
+function isFreshExpiredPage(html) {
+  return (
+    /This link has expired/i.test(html) &&
+    signedHrefs(html).length === 0 &&
+    !/\shref="\/"|href="\/\?/i.test(html) &&
+    /href="\/record"/i.test(html)
+  );
+}
+
+/** Well-formed visit id that is vanishingly unlikely to exist. */
+function fakeVisitId() {
+  return "ZZZZZZZZZZZZZZZZZZZZZZZZZZ";
+}
+
 function parseDeclineLink(html) {
   const re =
     /\/s\/([A-Z2-7]{26})\/decline\/([a-z0-9_]+)\?n=([^"'&\s]+)/;
@@ -354,18 +407,15 @@ async function runRemaining() {
       record("8-sweep", false, "no visit");
     } else {
       // Three GETs must land inside the 2s window — Preview RTTs are ~1s each,
-      // so fire them in parallel. Branched visits remint on the next draw (R1).
+      // so fire them in parallel. Spec 004: branched draw shows stale page
+      // (single fresh link), no auto-remint.
       await Promise.all([
         req(`/s/${id}/draw`),
         req(`/s/${id}/draw`),
         req(`/s/${id}/draw`),
       ]);
       const again = await req(`/s/${id}/draw`);
-      const reminted = extractVisitId(again.body);
-      const branchedHint =
-        /earlier visit/i.test(again.body) ||
-        /This visit is complete|Start a fresh cell/i.test(again.body) ||
-        (Boolean(reminted) && reminted !== id);
+      const branchedStale = isStalePage(again.body);
       const d = await drawOnce();
       let sweptDrawing = false;
       if (d.ok && d.write.status === 302) {
@@ -388,10 +438,198 @@ async function runRemaining() {
       }
       record(
         "8-sweep",
-        branchedHint && sweptDrawing,
-        `pre-draw-sweep=${branchedHint} drawn-then-swept=${sweptDrawing}`,
+        branchedStale && sweptDrawing,
+        `pre-draw-stale=${branchedStale} drawn-then-swept=${sweptDrawing}`,
       );
     }
+  }
+
+  // Spec 004 — remint loop fix (checks 1–6)
+  {
+    await req("/api/test/reset-source-caps", { method: "POST" });
+    const unknown = fakeVisitId();
+
+    // 1. Stale draw link (unknown id) → no remint; one signed fresh; zero patterns
+    const staleDraw = await req(`/s/${unknown}/draw`);
+    const stale1 = isStalePage(staleDraw.body);
+    const fresh1 = parseFreshLink(staleDraw.body);
+    record(
+      "004-1-stale-draw",
+      stale1 && fresh1?.visitId === unknown,
+      `stalePage=${stale1} freshFor=${fresh1?.visitId || "none"} patterns=${patternLinkCount(staleDraw.body)} signed=${signedHrefs(staleDraw.body).length}`,
+    );
+
+    // 2. Stale write link → redirect to draw stale page; no remint
+    const staleWrite = await req(
+      `/s/${unknown}/draw/p0?n=0.bad&x=0&y=0`,
+    );
+    const writeLoc = staleWrite.location || "";
+    const writeFollow =
+      staleWrite.status === 302 && /\/draw/.test(writeLoc)
+        ? await req(writeLoc.replace(/^https?:\/\/[^/]+/, "") || writeLoc)
+        : staleWrite;
+    const stale2 = isStalePage(writeFollow.body);
+    record(
+      "004-2-stale-write",
+      staleWrite.status === 302 &&
+        writeLoc.includes(`/s/${unknown}/draw`) &&
+        stale2,
+      `status=${staleWrite.status} loc=${writeLoc.slice(-40)} stalePage=${stale2}`,
+    );
+
+    // 3. Fresh within TTL → one new visit; 16 pattern links
+    let freshOk = false;
+    let newId = null;
+    let freshPatterns = -1;
+    if (fresh1) {
+      const followed = await req(
+        `/s/${fresh1.visitId}/fresh?n=${encodeURIComponent(fresh1.n)}`,
+        { redirect: "manual" },
+      );
+      const loc = followed.location || "";
+      newId = loc.match(/\/s\/([A-Z2-7]{26})\//)?.[1] || null;
+      const locPath = loc.replace(/^https?:\/\/[^/]+/, "");
+      const drawPage =
+        followed.status >= 300 && followed.status < 400 && locPath
+          ? await req(locPath)
+          : followed;
+      const body = drawPage.body;
+      newId = newId || extractVisitId(body);
+      freshPatterns = patternLinkCount(body);
+      freshOk =
+        Boolean(newId) &&
+        newId !== unknown &&
+        freshPatterns === 16;
+    }
+    record(
+      "004-3-fresh-ok",
+      freshOk,
+      `newId=${newId || "none"} patterns=${freshPatterns}`,
+    );
+
+    // 4. Fresh expired (short TTL on stale page) → dead end, no signed links
+    const shortStale = await req(`/s/${unknown}/draw`, {
+      headers: { "x-senjafuda-test-ttl": "1" },
+    });
+    const shortFresh = parseFreshLink(shortStale.body);
+    await sleep(1500);
+    let expiredOk = false;
+    if (shortFresh) {
+      const expired = await req(
+        `/s/${shortFresh.visitId}/fresh?n=${encodeURIComponent(shortFresh.n)}`,
+      );
+      expiredOk =
+        expired.status === 200 &&
+        isFreshExpiredPage(expired.body) &&
+        patternLinkCount(expired.body) === 0;
+      record(
+        "004-4-fresh-expired",
+        expiredOk,
+        `status=${expired.status} expiredPage=${isFreshExpiredPage(expired.body)} signed=${signedHrefs(expired.body).length}`,
+      );
+    } else {
+      record("004-4-fresh-expired", false, "no short-TTL fresh link on stale page");
+    }
+
+    // 5. Simulated crawler: stale links, wait past TTL, follow all → zero remints
+    const crawlStale = await req(`/s/${unknown}/draw`, {
+      headers: { "x-senjafuda-test-ttl": "1" },
+    });
+    const crawlLinks = allHrefs(crawlStale.body);
+    await sleep(1500);
+    let minted = 0;
+    for (const href of crawlLinks) {
+      const path = href.startsWith("http")
+        ? href.replace(/^https?:\/\/[^/]+/, "")
+        : href;
+      const res = await req(path);
+      const loc = res.location || "";
+      const remintLoc = /\/s\/([A-Z2-7]{26})\//.exec(loc);
+      if (remintLoc && remintLoc[1] !== unknown) minted += 1;
+      if (
+        patternLinkCount(res.body) === 16 &&
+        extractVisitId(res.body) &&
+        extractVisitId(res.body) !== unknown
+      ) {
+        minted += 1;
+      }
+    }
+    record(
+      "004-5-crawler",
+      crawlLinks.length > 0 && minted === 0,
+      `links=${crawlLinks.length} minted=${minted} hrefs=${crawlLinks.join(",")}`,
+    );
+
+    // 6. Normal flow + expired sig on own fresh visit → same step, no remint
+    const { id: ownId } = await mintVisit();
+    let normalOk = false;
+    let lateOk = false;
+    if (ownId) {
+      const draw = await req(`/s/${ownId}/draw`);
+      const link = parseDrawLink(draw.body);
+      if (link && LINK_SECRET) {
+        const exp = Math.floor(Date.now() / 1000) - 60;
+        const expiredN = sign({
+          visitId: ownId,
+          action: "draw",
+          target: link.pattern,
+          x: String(link.x),
+          y: String(link.y),
+          exp,
+        });
+        const late = await req(
+          `/s/${ownId}/draw/${link.pattern}?n=${encodeURIComponent(expiredN)}&x=${link.x}&y=${link.y}`,
+        );
+        const lateLoc = late.location || "";
+        const again =
+          late.status === 302
+            ? await req(lateLoc.replace(/^https?:\/\/[^/]+/, "") || `/s/${ownId}/draw`)
+            : late;
+        lateOk =
+          late.status === 302 &&
+          lateLoc.includes(`/s/${ownId}/draw`) &&
+          patternLinkCount(again.body) === 16 &&
+          extractVisitId(again.body) === ownId;
+      }
+      // Finish a normal path: draw → finish
+      if (link) {
+        const w = await req(
+          `/s/${link.visitId}/draw/${link.pattern}?n=${encodeURIComponent(link.n)}&x=${link.x}&y=${link.y}`,
+        );
+        const censusLoc = w.location || "";
+        if (w.status === 302 && /\/(arrival|decider)/.test(censusLoc)) {
+          const finishN = LINK_SECRET
+            ? sign({
+                visitId: ownId,
+                action: "finish",
+                target: "",
+                x: "",
+                y: "",
+                exp: Math.floor(Date.now() / 1000) + 300,
+              })
+            : null;
+          // Prefer finish link from census page
+          const census = await req(censusLoc.replace(/^https?:\/\/[^/]+/, ""));
+          const fin = census.body.match(
+            /\/s\/[A-Z2-7]{26}\/finish\?n=([^"'&\s]+)/,
+          );
+          const n = fin ? decodeURIComponent(fin[1]) : finishN;
+          if (n) {
+            const finRes = await req(
+              `/s/${ownId}/finish?n=${encodeURIComponent(n)}`,
+            );
+            normalOk =
+              finRes.status === 302 &&
+              (finRes.location || "").includes("/thanks");
+          }
+        }
+      }
+    }
+    record(
+      "004-6-normal",
+      Boolean(ownId) && normalOk && (LINK_SECRET ? lateOk : true),
+      `ownId=${ownId || "none"} finish=${normalOk} lateReRender=${LINK_SECRET ? lateOk : "skip-no-link-secret"}`,
+    );
   }
 
   // 9. Per-source cap with enforce: 5 ok, 6th → source-cap
@@ -743,17 +981,16 @@ async function runIpUaCheck() {
 function writeReport() {
   const dir = path.join(ROOT, "docs", "debug-investigations");
   mkdirSync(dir, { recursive: true });
-  const out = path.join(dir, "003-era1-preview-smoke.md");
-  const existing = existsSync(out) ? readFileSync(out, "utf8") : "";
-  const withoutD = existing.replace(/\n## Run D[\s\S]*?(?=\n## |$)/, "\n");
+  const out = path.join(dir, "005-remint-loop-fix.md");
   const passed = results.filter((r) => r.pass).length;
-  const runD = `
-## Run D — growth fix, prod test-route 404s, superseded query
+  const remint = results.filter((r) => String(r.id).startsWith("004-"));
+  const remintPass = remint.filter((r) => r.pass).length;
+  const body = `# Remint loop fix — preview verification (spec 004)
 
 **Date:** ${new Date().toISOString()}
 **Preview deployment:** ${DEP}
-**Method:** Node \`fetch\` + protection bypass + test hooks
-**Automated:** **${passed}/${results.length}** checks in this run
+**Method:** Node \`fetch\` + protection bypass + test hooks (\`scripts/era1-smoke.mjs\`)
+**Automated:** **${passed}/${results.length}** checks in this run (spec 004 remint checks **${remintPass}/${remint.length}**)
 
 | Id | Result | Detail |
 |---|---|---|
@@ -764,16 +1001,18 @@ ${results
   )
   .join("\n")}
 
+## Spec 004 checklist
+
+- [ ] 1 Stale draw → one signed \`/fresh\`, zero pattern links, no remint
+- [ ] 2 Stale write → redirect to draw stale page, no remint
+- [ ] 3 Fresh within TTL → new visit, 16 pattern links
+- [ ] 4 Fresh expired → HTML dead end, no signed links, no \`/\`
+- [ ] 5 Crawler: follow all stale-page links after TTL → zero new visits
+- [ ] 6 Normal flow + expired sig on own visit → re-render, no remint
+- [ ] 7 \`/llms.txt\` new line; production \`/api/test/*\` → 404 (manual / prod check)
+
 `;
-  let next = withoutD;
-  if (next.includes("## Checklist")) {
-    next = next.replace("## Checklist", runD + "## Checklist");
-  } else if (next.includes("## Notes")) {
-    next = next.replace("## Notes", runD + "## Notes");
-  } else {
-    next = next.trimEnd() + "\n" + runD;
-  }
-  writeFileSync(out, next);
+  writeFileSync(out, body);
   console.log("Wrote", out);
 }
 

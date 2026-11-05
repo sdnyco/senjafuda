@@ -4,7 +4,7 @@ import { CanvasPre } from "@/components/CanvasPre";
 import {
   NothingRecorded,
   RateLimitedPage,
-  VisitClosed,
+  StaleVisitPage,
 } from "@/components/StatusPages";
 import { absToRowCol } from "@/lib/canvas";
 import { assignCellForVisit, applySweepHit } from "@/lib/era1-write";
@@ -17,11 +17,7 @@ import {
   signFreshLink,
 } from "@/lib/link-sign";
 import { unansweredCensusField } from "@/lib/era1-write";
-import {
-  checkSGetLimit,
-  checkMintSourceLimit,
-  checkAndIncrGlobalMint,
-} from "@/lib/rate-limit";
+import { checkSGetLimit } from "@/lib/rate-limit";
 import { pageIfUnavailable, redirectTemporarilyClosedPage } from "@/lib/upstash-response";
 import {
   parseForcedCell,
@@ -33,7 +29,6 @@ import {
   getVisit,
   isRecentlyDrawn,
   isVisitUnusable,
-  remintFrom,
 } from "@/lib/visits";
 
 export const dynamic = "force-dynamic";
@@ -62,7 +57,18 @@ export default async function DrawPage({ params, searchParams }: Props) {
     return <RateLimitedPage />;
   }
 
-  let visit = await getVisit(v);
+  const hooks = testHooksAllowed(h.get("x-senjafuda-test"));
+  const ttl = hooks
+    ? parseTtlOverride(h.get("x-senjafuda-test-ttl"))
+    : undefined;
+
+  const visit = await getVisit(v);
+  if (!visit || (await isVisitUnusable(visit))) {
+    // Spec 004: no auto-remint, no sweep on stale early return.
+    const freshN = signFreshLink({ visitId: visit?.id ?? v, ttlSec: ttl });
+    return <StaleVisitPage visitId={visit?.id ?? v} freshN={freshN} />;
+  }
+
   let note: string | null =
     sp.note === "expired"
       ? "That link had expired, so nothing was recorded. Here is the step again."
@@ -72,24 +78,7 @@ export default async function DrawPage({ params, searchParams }: Props) {
           ? "The link you followed belonged to an earlier visit, so nothing was recorded from it. Here is a fresh cell for you."
           : null;
 
-  if (!visit || (await isVisitUnusable(visit))) {
-    const mintOk = await checkMintSourceLimit();
-    const globalOk = await checkAndIncrGlobalMint();
-    pageIfUnavailable(mintOk, globalOk);
-    if (!mintOk.success || !globalOk.success) {
-      return (
-        <NothingRecorded>
-          <p>
-            The link you followed belonged to an earlier visit, so nothing was
-            recorded from it. New visits are unavailable right now.
-          </p>
-        </NothingRecorded>
-      );
-    }
-    visit = await remintFrom(visit?.id ?? v, h.get("user-agent"));
-    note =
-      "The link you followed belonged to an earlier visit, so nothing was recorded from it. Here is a fresh cell for you.";
-  } else if (visit.status === "drawn") {
+  if (visit.status === "drawn") {
     const { recent, drawing } = await isRecentlyDrawn(visit);
     if (recent && drawing) {
       const db = getDb();
@@ -119,13 +108,6 @@ export default async function DrawPage({ params, searchParams }: Props) {
         </Shell>
       );
     }
-  } else if (
-    visit.status === "signed" ||
-    visit.status === "declined" ||
-    visit.status === "branched"
-  ) {
-    const fresh = signFreshLink({ visitId: visit.id });
-    return <VisitClosed freshHref={`/s/${visit.id}/fresh?n=${fresh}`} />;
   }
 
   const sweep = await applySweepHit(visit.id);
@@ -133,15 +115,11 @@ export default async function DrawPage({ params, searchParams }: Props) {
     redirectTemporarilyClosedPage();
   }
   if (sweep === "branched" || sweep === "swept") {
-    const fresh = signFreshLink({ visitId: visit.id });
-    return <VisitClosed freshHref={`/s/${visit.id}/fresh?n=${fresh}`} />;
+    const freshN = signFreshLink({ visitId: visit.id, ttlSec: ttl });
+    return <StaleVisitPage visitId={visit.id} freshN={freshN} />;
   }
 
-  const hooks = testHooksAllowed(h.get("x-senjafuda-test"));
   const forced = hooks ? parseForcedCell(h.get("x-senjafuda-test-cell")) : null;
-  const ttl = hooks
-    ? parseTtlOverride(h.get("x-senjafuda-test-ttl"))
-    : undefined;
 
   const { cell, frameSize } = await assignCellForVisit(forced);
   const db = getDb();

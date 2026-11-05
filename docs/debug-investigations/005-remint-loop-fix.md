@@ -1,8 +1,8 @@
 # Remint loop fix — preview verification (spec 004)
 
-**Date:** 2026-11-05T12:59:51.897Z  
-**Commit:** `c359d86` (+ smoke assertion follow-ups)  
-**Preview deployment:** https://senjafuda-k6snk4pda-sdnycos-projects.vercel.app  
+**Date:** 2026-11-05T13:17:00.000Z  
+**Commits:** `b0ec654` (R2) on `remint-loop-fix`  
+**Preview deployment:** https://senjafuda-9c9dv0mmb-sdnycos-projects.vercel.app  
 **Method:** Node `fetch` + protection bypass + test hooks (`scripts/era1-smoke.mjs`)
 
 ## Spec 004 checklist
@@ -11,36 +11,41 @@
 - [x] 2 Stale write → redirect to draw stale page, no remint
 - [x] 3 Fresh within TTL → new visit, 16 pattern links
 - [x] 4 Fresh expired → HTML dead end, no signed links, no `/`
-- [x] 5 Crawler: follow all stale-page links after TTL → zero new visits (`/fresh`, `/record`, `/llms.txt`, `/data`)
+- [x] 5 Late crawler: follow all stale-page links after TTL → zero new visits
 - [x] 6 Normal flow + expired sig on own visit → re-render, no remint
-- [x] 7 `/llms.txt` contains the new “Start a fresh cell” line; production `/api/test/*` → 404
+- [x] 7 Fast crawler depth-3 → ≤ 3 visits (one per generation); gen1 size = 1
+- [x] 8 Duplicate fresh → one child; later responses are child stale
+- [x] 9 Concurrent fresh → exactly one child (`created+stale`)
+- [x] `/llms.txt` new line; production `/api/test/*` → 404
 
-## Automated results (final run)
+## Automated results
 
-**16/17** automated checks; **spec 004 remint checks 6/6**.
+**20/20** checks passed (spec 004 remint **9/9**).
 
 | Id | Result | Detail |
 |---|---|---|
-| 0-hook-echo | PASS | status=200 hooks=true env=preview |
-| 5-cell-race | PASS | forced cell race → `note=taken` |
+| 0-hook-echo | PASS | hooks=true env=preview |
+| 5-cell-race | PASS | |
 | 7-growth | PASS | at 11 → 5; at 12 → 7 |
-| 8-sweep | PASS | branched draw → stale page (no auto-remint); swept cell reclaimable |
-| 9-source-cap | FAIL* | reset=200 but first draw already capped |
-| 004-1-stale-draw | PASS | stalePage; one signed fresh; 0 patterns |
-| 004-2-stale-write | PASS | 302 → same visit draw stale page |
-| 004-3-fresh-ok | PASS | new visit; 16 patterns |
-| 004-4-fresh-expired | PASS | HTML dead end; 0 signed; no `/` |
-| 004-5-crawler | PASS | 4 links; minted=0 |
-| 004-6-normal | PASS | finish + late re-render on own visit |
+| 8-sweep | PASS | branched → stale page; swept reclaimable |
+| 9-source-cap | PASS | 5 ok, 6th cap |
+| 004-1-stale-draw | PASS | |
+| 004-2-stale-write | PASS | |
+| 004-3-fresh-ok | PASS | 16 patterns |
+| 004-4-fresh-expired | PASS | |
+| 004-5-crawler | PASS | minted=0 |
+| 004-6-normal | PASS | |
+| 004-7-fast-crawler | PASS | minted=3 gen1=1 chain=true |
+| 004-8-duplicate-fresh | PASS | created then stale+stale; 1 child |
+| 004-9-concurrent-fresh | PASS | created+stale; 1 child |
 | 10-decline | PASS | |
 | 11-form | PASS | |
-| 12-census-correction | PASS | supersededRows=1 |
+| 12-census-correction | PASS | |
 | 14-export | PASS | |
 | 15-no-ip-ua | PASS | |
-| prod-test-routes-404 | PASS | all listed `/api/test/*` → 404 on senjafuda.org |
+| prod-test-routes-404 | PASS | |
 
-\* `9-source-cap` **passed** on the first smoke against this Preview (`c359d86` deploy) before repeated runs left the per-source draw counter hot. `reset-source-caps` returned 200 but did not clear enough Upstash keys for a clean re-run. Unrelated to remint behaviour; not a regression from this change.
+## Notes
 
-## Manual note (check 7)
-
-`GET /llms.txt` on Preview includes: *If a link belongs to an earlier visit, you will get one "Start a fresh cell" link. Follow it promptly; it expires after 5 minutes.*
+- Migration `0003_inherited_from_unique` applied on Preview build (dedupe then unique partial index).
+- R2 turns fast-crawler fan-out into a chain (≤1 child per parent).

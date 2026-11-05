@@ -2,7 +2,7 @@
 
 > Owned by Sidney and Claude. Cursor does not edit this file; it writes to `/docs/implementation-summaries` and `/docs/debug-investigations`, which get reviewed and folded in here.
 
-**Last updated:** 2026-10-18
+**Last updated:** 2026-11-05
 
 ## What this is
 
@@ -28,7 +28,9 @@ Background: `/docs/concept.md` (the original idea spec of 2026-10-05; its tile-g
 | Public ids | Exports and pages show salted `public_id`, never token ids | Raw ids let anyone complete another visitor's open token |
 | Crawler entries | Labelled `swept`, never deleted or rewritten | Certificate Transparency scanners arrive within minutes of cert issuance, ignore robots.txt and click every link |
 | Migrations | Applied by the build on deploy; previews migrate their own branch first | No production credentials on disk, so no agent can go hunting for them |
-| Docs naming | Specs end in `-spec.md`; implementation summaries keep the bare name | Easy to tell apart at a glance |
+| Migrations never edit data | Every migration re-runs on every deploy, so migrations are additive and re-runnable, and **never UPDATE or DELETE existing rows**. Enforced by `.cursor/rules/no-data-edits-in-migrations.mdc` (2026-11-05) | The record is never edited. A draft migration for spec 004 R2 would have rewritten `inherited_from` in production; it was caught in review and replaced with an additive column |
+| Eras | **An era changes when the conditions visitors draw under change**: canvas rules, vocabulary, seal, who may draw. Flow plumbing (how links expire, how stale visits are handled) is not a condition (2026-11-05) | Keeps eras meaningful as experimental conditions rather than as release numbers |
+| Docs naming | Specs end in `-spec.md`; implementation summaries keep the bare name. **From spec 005 on, a spec, its implementation summary and its debug investigations share the spec's number** (older files are numbered inconsistently and stay as they are) | Easy to tell apart at a glance, and easy to find what belongs together |
 | Expiry | Derived at read time (`effective_status`), never written by the export | The export role is SELECT-only by design and must stay that way |
 | Name | **senjafuda** (千社札): the name slips pilgrims paste on shrine gates to record that they passed through | Mirrors the page exactly. Avoids the conspiratorial associations of Kabbalah terms. The page carries one plain sentence explaining the choice. |
 
@@ -85,15 +87,22 @@ Background: `/docs/concept.md` (the original idea spec of 2026-10-05; its tile-g
 - [x] Next.js `middleware` → `proxy` rename (PR #3, verified on Preview: `/docs/debug-investigations/004-proxy-rename.md`).
 - [x] Merged branches deleted; `main` is the only branch.
 - [ ] Offline copy of the seal key (author, in Berlin).
-- [ ] **Watch remints.** Day 1 (246 visits): 48% were created by remints, mostly the frozen-iOS scanner draining pilot-era links; 65% `ua_suspect`; 0 agent fetchers; 0 cells. If the remint share doesn't fade within ~2 weeks, remint only on links carrying an era-1 signature (valid or expired); unsigned pilot links get the plain "nothing here" page.
+- [x] **Watch remints** → resolved by spec 004 (see the 2026-11-05 review below). Day 1 (246 visits): 48% were remints, mostly the frozen-iOS scanner draining pilot-era links; 65% `ua_suspect`; 0 agent fetchers; 0 cells.
 - **First cells: 2026-10-27.** Two visitor drawings (▗ at the top-left corner, ▚ at row 1, column 3), 7 seconds apart, both finished without census answers. Health check that day: growth correct, live canvas = DB, no anomalies, seal chain complete 23–27 Oct, `late_fetches` 13, remints steady at ~120/day (60% of 1,050 visits).
-- **Review on 2026-11-05.** Agenda:
-  1. **Remints:** if still flat (~120/day), remint only on links with an era-1 signature; unsigned pilot links get the "nothing here" page.
-  2. **`unrecognised` user-agents:** we can't learn which new agent fetchers they are, because raw UAs are never stored. Proposal: for `unrecognised` visits only, keep the *first product token* (e.g. `MyAgent`), never the full string, and review aggregate counts to add new families to the rules. It loosens a deliberate principle, so decide consciously.
-  3. **Defence check:** the author privately checks the drawing visits (`ua_suspect`, `ua_class`, remint origin, time from issue to completion) and reports only "gap / no gap." A fix for a gap changes conditions, so it would be a new era; existing cells stay either way.
+- **Review on 2026-11-05.** Outcomes:
+  1. **Remints: a crawler amplifier, fixed (spec 004).** Since launch, 9,919 visits, 8,877 of them remints (89%). Bursts on 27 Oct (1,838), **28 Oct (5,000: the global cap was hit, so real visitors saw "the canvas is resting" for the rest of that UTC day)** and 3 Nov (815). Cause: each remint page carried ~17 freshly signed links, and crawlers following them minted a visit per link (a tree). The frozen-iOS scanner was not the cause. Fix (`/docs/specs/004-remint-loop-fix-spec.md`):
+     - **R1:** stale links write and mint nothing; they render one page with exactly one signed "Start a fresh cell" link (`/fresh`), the only remint path. An expired `fresh` link is an HTML dead end.
+     - **R2:** each visit spawns at most one fresh visit (race-safe via the additive `fresh_parent` column + unique partial index), so a fast crawler produces a chain bounded by the per-source mint cap, not a tree.
+     - **R3:** malformed visit ids → 404; the "nothing recorded" page no longer links to `/`.
+     - Merged 2026-11-05 (PR #4; R3 in PR #5). Preview smoke 22/22; production check read-only (`/docs/debug-investigations/005-remint-loop-fix.md`). Not a new era (era rule above); dated note in `/data/README.md`.
+     - **What actually amplifies is unique signed URLs.** A link to `/` is one URL that crawlers dedupe, so `/` links elsewhere (404 page, record, draw page) are fine and R3 is not to be extended to them.
+     - [ ] Watch for a week: remints should fall from ~89% to a small share of visits. If not, there is a path we haven't found.
+  2. **`unrecognised` user-agents: not adopted for now.** The bursts were mostly ordinary browser user-agents, so first product tokens of `unrecognised` UAs wouldn't have explained them. The principle (raw UAs never stored) stays intact. Revisit at the three-month review if the `unrecognised` share grows.
+  3. **Defence check: no gap.** The author checked the drawing visits privately and reported only the verdict. Separately, 26 drawings are `excluded` (ghost layer): fast crawlers reached draw links within the TTL and were caught by sweep detection, as designed.
 - **The first cell is left to chance (decided 2026-10-23).** The author doesn't send an agent for now; maybe later, if a natural context arises. No hurry: the project's lifespan is ten years.
 - **Reminders:** three-month review on 2027-01-22 (in the design conversation); a yearly check-in every 22 October (fresh session, public files only, never sealed data, never draws).
-- [ ] Verify the first sealed export: an `.age` delta file and a first `chain.txt` line in `/data/era1/sealed/` after the next nightly run.
+- [x] Sealed export verified: daily `.age` deltas in `/data/era1/sealed/` from 23 Oct onwards, `chain.txt` complete (checked again at the 2026-11-05 review).
+- [x] Neon branches cleaned up 2026-11-05: only `main` and `dev` remain (`preview/era1` deleted too, since the pilot tables are still in `main`). Consider the integration's automatic cleanup of obsolete preview branches.
 - Follow-ups from spec 003 §14 remain queued (JSON API, verified agent identity, DB role split, local dashboard, design pass, 2036 reveal tooling).
 
 ### Relaunch spec written (2026-10-20): `/docs/specs/003-relaunch-era1-spec.md`
@@ -103,7 +112,7 @@ Scope decisions made in the spec (beyond the design decisions below):
 - **Signed links expire after 5 min** (form path 15 min). An expired link writes nothing and returns a working fresh page.
 - **No cell reservation:** first valid submission wins, and the loser gets a new cell with nothing written.
 - **Per-source cap of 5 drawings/day** and a **global cap of 5,000 visits/day**.
-- **Stale, used or unknown visit ids** (fetch caches) mint a fresh visit with `inherited_from`; refusal pages always say nothing was recorded.
+- ~~**Stale, used or unknown visit ids** (fetch caches) mint a fresh visit with `inherited_from`~~ (superseded by spec 004: one signed `fresh` link, at most one child per visit); refusal pages always say nothing was recorded.
 - Decline only before drawing.
 - Pilot tables stay untouched; era 1 uses new tables (additive).
 - **Deferred:** JSON API, IP-range and signed-agent verification, DB role split, local dashboard, visual design pass, 2036 reveal tooling.
@@ -136,10 +145,9 @@ Scope decisions made in the spec (beyond the design decisions below):
 ## Open
 
 - **Preview and Production share one Upstash database and key prefix.** Low impact (rate-limit buckets are shared); separate later via an env-based prefix if it matters.
-- **Next.js `middleware` → `proxy`** rename (Next 16 deprecation): migrate once stable.
-- **Symbol set** for `mark` (12 symbols, each with a one-line text description).
-- **Rotating question:** whether to have one, and which.
-- **Settled vocabulary** after the copy test may add or remove options. That becomes v1.0 at launch; anything later is v2.
+- **Small cleanups, whenever:** the deprecated `remintFrom` wrapper is unused and can go; an index on `inherited_from` (only searched for pre-R2 parents) is an optional additive migration if lookups ever get slow.
+- ~~Next.js `middleware` → `proxy` rename~~ done (PR #3).
+- ~~Symbol set for `mark`, rotating question, settled vocabulary~~: pilot-era questions, superseded by the canvas (era 1).
 
 ## Known limitations (by design)
 

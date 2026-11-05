@@ -181,8 +181,13 @@ function allHrefs(html) {
   return out;
 }
 
+/** Unique pattern ids in hrefs (Next RSC payloads can duplicate the same href). */
 function patternLinkCount(html) {
-  return (html.match(/\/draw\/p\d+\?/g) || []).length;
+  const ids = new Set();
+  const re = /href="[^"]*\/draw\/(p\d+)\?/g;
+  let m;
+  while ((m = re.exec(html))) ids.add(m[1]);
+  return ids.size;
 }
 
 function isStalePage(html) {
@@ -444,6 +449,30 @@ async function runRemaining() {
     }
   }
 
+  // 9. Per-source cap with enforce: 5 ok, 6th → source-cap
+  {
+    const reset = await req("/api/test/reset-source-caps", { method: "POST" });
+    const outcomes = [];
+    for (let i = 0; i < 6; i++) {
+      const d = await drawOnce(null, true);
+      const loc = d.write?.location || "";
+      outcomes.push({
+        i: i + 1,
+        status: d.write?.status,
+        cap: loc.includes("source-cap"),
+        census: /\/(arrival|decider|family|return)/.test(loc),
+        ok: Boolean(d.ok && d.write),
+      });
+    }
+    const first5 = outcomes.slice(0, 5).every((o) => o.census);
+    const sixthCap = outcomes[5]?.cap === true;
+    record(
+      "9-source-cap",
+      reset.status === 200 && first5 && sixthCap,
+      `reset=${reset.status} outcomes=${outcomes.map((o) => `${o.i}:${o.cap ? "cap" : o.census ? "ok" : o.status ?? "novisit"}`).join(",")}`,
+    );
+  }
+
   // Spec 004 — remint loop fix (checks 1–6)
   {
     await req("/api/test/reset-source-caps", { method: "POST" });
@@ -535,7 +564,10 @@ async function runRemaining() {
     const crawlStale = await req(`/s/${unknown}/draw`, {
       headers: { "x-senjafuda-test-ttl": "1" },
     });
-    const crawlLinks = allHrefs(crawlStale.body);
+    // Page action / footer links only (ignore Next assets + favicon).
+    const crawlLinks = allHrefs(crawlStale.body).filter(
+      (h) => !h.includes("/_next/") && !h.includes("favicon"),
+    );
     await sleep(1500);
     let minted = 0;
     for (const href of crawlLinks) {
@@ -565,58 +597,44 @@ async function runRemaining() {
     let normalOk = false;
     let lateOk = false;
     if (ownId) {
-      const draw = await req(`/s/${ownId}/draw`);
-      const link = parseDrawLink(draw.body);
-      if (link && LINK_SECRET) {
-        const exp = Math.floor(Date.now() / 1000) - 60;
-        const expiredN = sign({
-          visitId: ownId,
-          action: "draw",
-          target: link.pattern,
-          x: String(link.x),
-          y: String(link.y),
-          exp,
-        });
+      const shortDraw = await req(`/s/${ownId}/draw`, {
+        headers: { "x-senjafuda-test-ttl": "1" },
+      });
+      const shortLink = parseDrawLink(shortDraw.body);
+      if (shortLink) {
+        await sleep(1500);
         const late = await req(
-          `/s/${ownId}/draw/${link.pattern}?n=${encodeURIComponent(expiredN)}&x=${link.x}&y=${link.y}`,
+          `/s/${ownId}/draw/${shortLink.pattern}?n=${encodeURIComponent(shortLink.n)}&x=${shortLink.x}&y=${shortLink.y}`,
         );
         const lateLoc = late.location || "";
+        const againPath = lateLoc.replace(/^https?:\/\/[^/]+/, "");
         const again =
           late.status === 302
-            ? await req(lateLoc.replace(/^https?:\/\/[^/]+/, "") || `/s/${ownId}/draw`)
+            ? await req(againPath || `/s/${ownId}/draw`)
             : late;
         lateOk =
           late.status === 302 &&
           lateLoc.includes(`/s/${ownId}/draw`) &&
+          !isStalePage(again.body) &&
           patternLinkCount(again.body) === 16 &&
           extractVisitId(again.body) === ownId;
       }
-      // Finish a normal path: draw → finish
+      // Fresh draw links for a normal finish path
+      const draw = await req(`/s/${ownId}/draw`);
+      const link = parseDrawLink(draw.body);
       if (link) {
         const w = await req(
           `/s/${link.visitId}/draw/${link.pattern}?n=${encodeURIComponent(link.n)}&x=${link.x}&y=${link.y}`,
         );
-        const censusLoc = w.location || "";
+        const censusLoc = (w.location || "").replace(/^https?:\/\/[^/]+/, "");
         if (w.status === 302 && /\/(arrival|decider)/.test(censusLoc)) {
-          const finishN = LINK_SECRET
-            ? sign({
-                visitId: ownId,
-                action: "finish",
-                target: "",
-                x: "",
-                y: "",
-                exp: Math.floor(Date.now() / 1000) + 300,
-              })
-            : null;
-          // Prefer finish link from census page
-          const census = await req(censusLoc.replace(/^https?:\/\/[^/]+/, ""));
+          const census = await req(censusLoc);
           const fin = census.body.match(
             /\/s\/[A-Z2-7]{26}\/finish\?n=([^"'&\s]+)/,
           );
-          const n = fin ? decodeURIComponent(fin[1]) : finishN;
-          if (n) {
+          if (fin) {
             const finRes = await req(
-              `/s/${ownId}/finish?n=${encodeURIComponent(n)}`,
+              `/s/${ownId}/finish?n=${encodeURIComponent(decodeURIComponent(fin[1]))}`,
             );
             normalOk =
               finRes.status === 302 &&
@@ -627,32 +645,8 @@ async function runRemaining() {
     }
     record(
       "004-6-normal",
-      Boolean(ownId) && normalOk && (LINK_SECRET ? lateOk : true),
-      `ownId=${ownId || "none"} finish=${normalOk} lateReRender=${LINK_SECRET ? lateOk : "skip-no-link-secret"}`,
-    );
-  }
-
-  // 9. Per-source cap with enforce: 5 ok, 6th → source-cap
-  {
-    const reset = await req("/api/test/reset-source-caps", { method: "POST" });
-    const outcomes = [];
-    for (let i = 0; i < 6; i++) {
-      const d = await drawOnce(null, true);
-      const loc = d.write?.location || "";
-      outcomes.push({
-        i: i + 1,
-        status: d.write?.status,
-        cap: loc.includes("source-cap"),
-        census: /\/(arrival|decider|family|return)/.test(loc),
-        ok: Boolean(d.ok && d.write),
-      });
-    }
-    const first5 = outcomes.slice(0, 5).every((o) => o.census);
-    const sixthCap = outcomes[5]?.cap === true;
-    record(
-      "9-source-cap",
-      reset.status === 200 && first5 && sixthCap,
-      `reset=${reset.status} outcomes=${outcomes.map((o) => `${o.i}:${o.cap ? "cap" : o.census ? "ok" : o.status ?? "novisit"}`).join(",")}`,
+      Boolean(ownId) && normalOk && lateOk,
+      `ownId=${ownId || "none"} finish=${normalOk} lateReRender=${lateOk}`,
     );
   }
 

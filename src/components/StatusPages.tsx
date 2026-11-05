@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
 import { Shell } from "./Shell";
 
-/** R15: never imply success with "already recorded". */
+/**
+ * R15: never imply success with "already recorded".
+ * Spec 004 R3: no minting link to `/` — keep `/record` only.
+ */
 export function NothingRecorded({
   title = "Nothing was recorded",
   children,
@@ -16,8 +19,6 @@ export function NothingRecorded({
         <p>Nothing was recorded from this link.</p>
       )}
       <p>
-        <a href="/">Start a fresh visit</a>
-        {" · "}
         <a href="/record">About the record</a>
       </p>
     </Shell>

@@ -886,6 +886,39 @@ async function runRemaining() {
       }
       record("004-9-concurrent-fresh", ok, detail);
     }
+
+    // 10. Malformed draw → 404 (spec 004 R3)
+    {
+      const mal = await req("/s/not-a-visit/draw");
+      record(
+        "004-10-malformed-draw",
+        mal.status === 404,
+        `status=${mal.status}`,
+      );
+    }
+
+    // 11. NothingRecorded / StaleVisitPage / FreshLinkExpiredPage: no href="/"
+    {
+      const unknown = fakeVisitId();
+      const pages = [
+        { name: "StaleVisitPage", path: `/s/${unknown}/draw` },
+        {
+          name: "FreshLinkExpiredPage",
+          path: `/s/${unknown}/fresh?n=1.deadbeef`,
+        },
+        { name: "NothingRecorded", path: `/s/${unknown}/thanks` },
+      ];
+      const details = [];
+      let ok = true;
+      for (const p of pages) {
+        const res = await req(p.path);
+        const homeHrefs = (res.body.match(/href="\/"/g) || []).length;
+        const pass = res.status === 200 && homeHrefs === 0;
+        if (!pass) ok = false;
+        details.push(`${p.name}:status=${res.status},href/=${homeHrefs}`);
+      }
+      record("004-11-no-mint-href", ok, details.join("; "));
+    }
   }
 
   // 10. Decline write + refuse after drawing
@@ -1211,44 +1244,17 @@ async function runIpUaCheck() {
 }
 
 function writeReport() {
-  const dir = path.join(ROOT, "docs", "debug-investigations");
-  mkdirSync(dir, { recursive: true });
-  const out = path.join(dir, "005-remint-loop-fix.md");
+  // Do not overwrite docs/debug-investigations/005 (production check lives there).
+  // Print a compact remint summary for the implementation summary.
   const passed = results.filter((r) => r.pass).length;
   const remint = results.filter((r) => String(r.id).startsWith("004-"));
   const remintPass = remint.filter((r) => r.pass).length;
-  const body = `# Remint loop fix — preview verification (spec 004)
-
-**Date:** ${new Date().toISOString()}
-**Preview deployment:** ${DEP}
-**Method:** Node \`fetch\` + protection bypass + test hooks (\`scripts/era1-smoke.mjs\`)
-**Automated:** **${passed}/${results.length}** checks in this run (spec 004 remint checks **${remintPass}/${remint.length}**)
-
-| Id | Result | Detail |
-|---|---|---|
-${results
-  .map(
-    (r) =>
-      `| ${r.id} | ${r.pass ? "PASS" : "FAIL"} | ${r.detail.replace(/\|/g, "/")} |`,
-  )
-  .join("\n")}
-
-## Spec 004 checklist
-
-- [ ] 1 Stale draw → one signed \`/fresh\`, zero pattern links, no remint
-- [ ] 2 Stale write → redirect to draw stale page, no remint
-- [ ] 3 Fresh within TTL → new visit, 16 pattern links
-- [ ] 4 Fresh expired → HTML dead end, no signed links, no \`/\`
-- [ ] 5 Late crawler: follow all stale-page links after TTL → zero new visits
-- [ ] 6 Normal flow + expired sig on own visit → re-render, no remint
-- [ ] 7 Fast crawler depth-3 → ≤ 3 visits (one per generation)
-- [ ] 8 Duplicate fresh → one child; later responses are child stale
-- [ ] 9 Concurrent fresh → exactly one child
-- [ ] llms.txt + production \`/api/test/*\` → 404
-
-`;
-  writeFileSync(out, body);
-  console.log("Wrote", out);
+  console.log(
+    `smoke summary: ${passed}/${results.length} (004: ${remintPass}/${remint.length}) against ${DEP}`,
+  );
+  for (const r of remint) {
+    console.log(`  ${r.pass ? "PASS" : "FAIL"} ${r.id}: ${r.detail}`);
+  }
 }
 
 async function main() {

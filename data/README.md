@@ -6,6 +6,10 @@ This folder is the public, append-only export of **senjafuda**, a visitors' book
 
 **Promise:** rows are never edited or deleted after export. Corrections, if any, are additive notes in this README — not rewrites of past files.
 
+## Era 1 remint behaviour (from 2026-11-05)
+
+From 2026-11-05, links from earlier visits no longer create new visits automatically. Visit counts before that date include crawler-driven remints (89% of visits from 22 Oct to 5 Nov 2026; up to 99% on 28 Oct, when the daily cap was reached). The only remint path is an explicit signed "Start a fresh cell" (`/fresh`) link, and each visit spawns at most one child remint (later `/fresh` follows for the same parent return that child's stale page). This is flow plumbing, not a change of draw conditions: **an era changes when the conditions visitors draw under change** (canvas rules, vocabulary, seal, who may draw); how stale links are handled is not a condition, so this does not start a new era.
+
 ## Files
 
 | File | Contents |

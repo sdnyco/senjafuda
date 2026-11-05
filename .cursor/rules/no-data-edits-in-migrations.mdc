@@ -1,0 +1,8 @@
+---
+description: Migrations must never UPDATE or DELETE existing data rows
+alwaysApply: true
+---
+
+# No data edits in migrations
+
+Migrations must never UPDATE or DELETE existing data rows. Only additive schema changes and idempotent inserts of new seed/config rows. Data is never edited.

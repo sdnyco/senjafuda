@@ -157,6 +157,133 @@ function parseDrawLink(html) {
   };
 }
 
+function parseFreshLink(html) {
+  const re = /\/s\/([A-Z2-7]{26})\/fresh\?n=([^"'&\s]+)/;
+  const m = html.match(re);
+  if (!m) return null;
+  return { visitId: m[1], n: decodeURIComponent(m[2]) };
+}
+
+/** href values that look like HMAC query links (`?n=`). */
+function signedHrefs(html) {
+  const out = [];
+  const re = /href="([^"]*\?n=[^"]+)"/g;
+  let m;
+  while ((m = re.exec(html))) out.push(m[1].replace(/&amp;/g, "&"));
+  return out;
+}
+
+function allHrefs(html) {
+  const out = [];
+  const re = /href="([^"]+)"/g;
+  let m;
+  while ((m = re.exec(html))) out.push(m[1].replace(/&amp;/g, "&"));
+  return out;
+}
+
+/** Unique pattern ids in hrefs (Next RSC payloads can duplicate the same href). */
+function patternLinkCount(html) {
+  const ids = new Set();
+  const re = /href="[^"]*\/draw\/(p\d+)\?/g;
+  let m;
+  while ((m = re.exec(html))) ids.add(m[1]);
+  return ids.size;
+}
+
+function isStalePage(html) {
+  return (
+    /earlier visit/i.test(html) &&
+    /Start a fresh cell/i.test(html) &&
+    patternLinkCount(html) === 0 &&
+    signedHrefs(html).length === 1 &&
+    Boolean(parseFreshLink(html)) &&
+    !/\shref="\/"|href="\/\?/i.test(html)
+  );
+}
+
+function isFreshExpiredPage(html) {
+  return (
+    /This link has expired/i.test(html) &&
+    signedHrefs(html).length === 0 &&
+    !/\shref="\/"|href="\/\?/i.test(html) &&
+    /href="\/record"/i.test(html)
+  );
+}
+
+/** Well-formed visit id that is vanishingly unlikely to exist (fresh each call). */
+function fakeVisitId() {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let s = "";
+  for (let i = 0; i < 26; i++) {
+    s += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return s;
+}
+
+function pathOnly(urlOrPath) {
+  if (!urlOrPath) return "";
+  return urlOrPath.replace(/^https?:\/\/[^/]+/, "");
+}
+
+/** /s/ links that do not write (skip pattern/census/decline/finish writes). */
+function remintRelevantHrefs(html) {
+  return allHrefs(html).filter((h) => {
+    if (!h.includes("/s/")) return false;
+    if (h.includes("/_next/") || h.includes("favicon")) return false;
+    if (/\/draw\/p\d+/.test(h)) return false;
+    if (/\/decline\/[a-z0-9_]+/.test(h)) return false;
+    if (/\/(arrival|decider|family|return)\/[a-z0-9_]+/.test(h)) return false;
+    if (/\/finish\?/.test(h)) return false;
+    return true;
+  });
+}
+
+function hasDrawOrCensusLinks(html) {
+  return (
+    /\/draw\/p\d+/.test(html) ||
+    /\/(arrival|decider|family|return)(?:\/|"|\?)/.test(html)
+  );
+}
+
+/** Follow a fresh link; classify created draw vs child stale vs expired. */
+async function followFresh(visitId, n) {
+  const res = await req(
+    `/s/${visitId}/fresh?n=${encodeURIComponent(n)}`,
+    { redirect: "manual" },
+  );
+  const loc = pathOnly(res.location || "");
+  if (res.status >= 300 && res.status < 400 && /\/draw/.test(loc)) {
+    const draw = await req(loc);
+    const id =
+      loc.match(/\/s\/([A-Z2-7]{26})\//)?.[1] || extractVisitId(draw.body);
+    return {
+      kind: "created",
+      id,
+      body: draw.body,
+      patterns: patternLinkCount(draw.body),
+    };
+  }
+  if (isStalePage(res.body)) {
+    const fresh = parseFreshLink(res.body);
+    return {
+      kind: "stale",
+      id: fresh?.visitId || null,
+      body: res.body,
+      fresh,
+    };
+  }
+  if (isFreshExpiredPage(res.body)) {
+    return { kind: "expired", id: null, body: res.body };
+  }
+  return {
+    kind: "other",
+    id: extractVisitId(res.body),
+    body: res.body,
+    status: res.status,
+    loc,
+  };
+}
+
 function parseDeclineLink(html) {
   const re =
     /\/s\/([A-Z2-7]{26})\/decline\/([a-z0-9_]+)\?n=([^"'&\s]+)/;
@@ -354,18 +481,15 @@ async function runRemaining() {
       record("8-sweep", false, "no visit");
     } else {
       // Three GETs must land inside the 2s window — Preview RTTs are ~1s each,
-      // so fire them in parallel. Branched visits remint on the next draw (R1).
+      // so fire them in parallel. Spec 004: branched draw shows stale page
+      // (single fresh link), no auto-remint.
       await Promise.all([
         req(`/s/${id}/draw`),
         req(`/s/${id}/draw`),
         req(`/s/${id}/draw`),
       ]);
       const again = await req(`/s/${id}/draw`);
-      const reminted = extractVisitId(again.body);
-      const branchedHint =
-        /earlier visit/i.test(again.body) ||
-        /This visit is complete|Start a fresh cell/i.test(again.body) ||
-        (Boolean(reminted) && reminted !== id);
+      const branchedStale = isStalePage(again.body);
       const d = await drawOnce();
       let sweptDrawing = false;
       if (d.ok && d.write.status === 302) {
@@ -388,8 +512,8 @@ async function runRemaining() {
       }
       record(
         "8-sweep",
-        branchedHint && sweptDrawing,
-        `pre-draw-sweep=${branchedHint} drawn-then-swept=${sweptDrawing}`,
+        branchedStale && sweptDrawing,
+        `pre-draw-stale=${branchedStale} drawn-then-swept=${sweptDrawing}`,
       );
     }
   }
@@ -416,6 +540,352 @@ async function runRemaining() {
       reset.status === 200 && first5 && sixthCap,
       `reset=${reset.status} outcomes=${outcomes.map((o) => `${o.i}:${o.cap ? "cap" : o.census ? "ok" : o.status ?? "novisit"}`).join(",")}`,
     );
+  }
+
+  // Spec 004 — remint loop fix (checks 1–6)
+  {
+    await req("/api/test/reset-source-caps", { method: "POST" });
+    const unknown = fakeVisitId();
+
+    // 1. Stale draw link (unknown id) → no remint; one signed fresh; zero patterns
+    const staleDraw = await req(`/s/${unknown}/draw`);
+    const stale1 = isStalePage(staleDraw.body);
+    const fresh1 = parseFreshLink(staleDraw.body);
+    record(
+      "004-1-stale-draw",
+      stale1 && fresh1?.visitId === unknown,
+      `stalePage=${stale1} freshFor=${fresh1?.visitId || "none"} patterns=${patternLinkCount(staleDraw.body)} signed=${signedHrefs(staleDraw.body).length}`,
+    );
+
+    // 2. Stale write link → redirect to draw stale page; no remint
+    const staleWrite = await req(
+      `/s/${unknown}/draw/p0?n=0.bad&x=0&y=0`,
+    );
+    const writeLoc = staleWrite.location || "";
+    const writeFollow =
+      staleWrite.status === 302 && /\/draw/.test(writeLoc)
+        ? await req(writeLoc.replace(/^https?:\/\/[^/]+/, "") || writeLoc)
+        : staleWrite;
+    const stale2 = isStalePage(writeFollow.body);
+    record(
+      "004-2-stale-write",
+      staleWrite.status === 302 &&
+        writeLoc.includes(`/s/${unknown}/draw`) &&
+        stale2,
+      `status=${staleWrite.status} loc=${writeLoc.slice(-40)} stalePage=${stale2}`,
+    );
+
+    // 3. Fresh within TTL → one new visit; 16 pattern links
+    let freshOk = false;
+    let newId = null;
+    let freshPatterns = -1;
+    if (fresh1) {
+      const followed = await req(
+        `/s/${fresh1.visitId}/fresh?n=${encodeURIComponent(fresh1.n)}`,
+        { redirect: "manual" },
+      );
+      const loc = followed.location || "";
+      newId = loc.match(/\/s\/([A-Z2-7]{26})\//)?.[1] || null;
+      const locPath = loc.replace(/^https?:\/\/[^/]+/, "");
+      const drawPage =
+        followed.status >= 300 && followed.status < 400 && locPath
+          ? await req(locPath)
+          : followed;
+      const body = drawPage.body;
+      newId = newId || extractVisitId(body);
+      freshPatterns = patternLinkCount(body);
+      freshOk =
+        Boolean(newId) &&
+        newId !== unknown &&
+        freshPatterns === 16;
+    }
+    record(
+      "004-3-fresh-ok",
+      freshOk,
+      `newId=${newId || "none"} patterns=${freshPatterns}`,
+    );
+
+    // 4. Fresh expired (short TTL on stale page) → dead end, no signed links
+    const shortStale = await req(`/s/${unknown}/draw`, {
+      headers: { "x-senjafuda-test-ttl": "1" },
+    });
+    const shortFresh = parseFreshLink(shortStale.body);
+    await sleep(1500);
+    let expiredOk = false;
+    if (shortFresh) {
+      const expired = await req(
+        `/s/${shortFresh.visitId}/fresh?n=${encodeURIComponent(shortFresh.n)}`,
+      );
+      expiredOk =
+        expired.status === 200 &&
+        isFreshExpiredPage(expired.body) &&
+        patternLinkCount(expired.body) === 0;
+      record(
+        "004-4-fresh-expired",
+        expiredOk,
+        `status=${expired.status} expiredPage=${isFreshExpiredPage(expired.body)} signed=${signedHrefs(expired.body).length}`,
+      );
+    } else {
+      record("004-4-fresh-expired", false, "no short-TTL fresh link on stale page");
+    }
+
+    // 5. Simulated crawler: stale links, wait past TTL, follow all → zero remints
+    const crawlStale = await req(`/s/${unknown}/draw`, {
+      headers: { "x-senjafuda-test-ttl": "1" },
+    });
+    // Page action / footer links only (ignore Next assets + favicon).
+    const crawlLinks = allHrefs(crawlStale.body).filter(
+      (h) => !h.includes("/_next/") && !h.includes("favicon"),
+    );
+    await sleep(1500);
+    let minted = 0;
+    for (const href of crawlLinks) {
+      const path = href.startsWith("http")
+        ? href.replace(/^https?:\/\/[^/]+/, "")
+        : href;
+      const res = await req(path);
+      const loc = res.location || "";
+      const remintLoc = /\/s\/([A-Z2-7]{26})\//.exec(loc);
+      if (remintLoc && remintLoc[1] !== unknown) minted += 1;
+      if (
+        patternLinkCount(res.body) === 16 &&
+        extractVisitId(res.body) &&
+        extractVisitId(res.body) !== unknown
+      ) {
+        minted += 1;
+      }
+    }
+    record(
+      "004-5-crawler",
+      crawlLinks.length > 0 && minted === 0,
+      `links=${crawlLinks.length} minted=${minted} hrefs=${crawlLinks.join(",")}`,
+    );
+
+    // 6. Normal flow + expired sig on own fresh visit → same step, no remint
+    const { id: ownId } = await mintVisit();
+    let normalOk = false;
+    let lateOk = false;
+    if (ownId) {
+      const shortDraw = await req(`/s/${ownId}/draw`, {
+        headers: { "x-senjafuda-test-ttl": "1" },
+      });
+      const shortLink = parseDrawLink(shortDraw.body);
+      if (shortLink) {
+        await sleep(1500);
+        const late = await req(
+          `/s/${ownId}/draw/${shortLink.pattern}?n=${encodeURIComponent(shortLink.n)}&x=${shortLink.x}&y=${shortLink.y}`,
+        );
+        const lateLoc = late.location || "";
+        const againPath = lateLoc.replace(/^https?:\/\/[^/]+/, "");
+        const again =
+          late.status === 302
+            ? await req(againPath || `/s/${ownId}/draw`)
+            : late;
+        lateOk =
+          late.status === 302 &&
+          lateLoc.includes(`/s/${ownId}/draw`) &&
+          !isStalePage(again.body) &&
+          patternLinkCount(again.body) === 16 &&
+          extractVisitId(again.body) === ownId;
+      }
+      // Fresh draw links for a normal finish path
+      const draw = await req(`/s/${ownId}/draw`);
+      const link = parseDrawLink(draw.body);
+      if (link) {
+        const w = await req(
+          `/s/${link.visitId}/draw/${link.pattern}?n=${encodeURIComponent(link.n)}&x=${link.x}&y=${link.y}`,
+        );
+        const censusLoc = (w.location || "").replace(/^https?:\/\/[^/]+/, "");
+        if (w.status === 302 && /\/(arrival|decider)/.test(censusLoc)) {
+          const census = await req(censusLoc);
+          const fin = census.body.match(
+            /\/s\/[A-Z2-7]{26}\/finish\?n=([^"'&\s]+)/,
+          );
+          if (fin) {
+            const finRes = await req(
+              `/s/${ownId}/finish?n=${encodeURIComponent(decodeURIComponent(fin[1]))}`,
+            );
+            normalOk =
+              finRes.status === 302 &&
+              (finRes.location || "").includes("/thanks");
+          }
+        }
+      }
+    }
+    record(
+      "004-6-normal",
+      Boolean(ownId) && normalOk && lateOk,
+      `ownId=${ownId || "none"} finish=${normalOk} lateReRender=${lateOk}`,
+    );
+
+    // 7. Fast crawler: follow /s/ links immediately to depth 3 + fan-out fresh
+    //    follows on the same parent → ≤ 3 visits (one per generation).
+    {
+      const A = fakeVisitId();
+      const minted = new Set();
+      const note = (id) => {
+        if (id && id !== A) minted.add(id);
+      };
+
+      async function walk(urlPath, depth) {
+        if (depth > 3) return;
+        const res = await req(urlPath, { redirect: "manual" });
+        const loc = pathOnly(res.location || "");
+        if (loc) {
+          const id = loc.match(/\/s\/([A-Z2-7]{26})\//)?.[1];
+          note(id);
+        }
+        let body = res.body;
+        if (res.status >= 300 && res.status < 400 && loc) {
+          const followed = await req(loc);
+          body = followed.body;
+          note(extractVisitId(body));
+          if (depth < 3) {
+            for (const href of remintRelevantHrefs(body)) {
+              await walk(pathOnly(href), depth + 1);
+            }
+          }
+          return;
+        }
+        if (patternLinkCount(body) === 16) note(extractVisitId(body));
+        if (isStalePage(body)) {
+          const f = parseFreshLink(body);
+          if (f) note(f.visitId);
+        }
+        if (depth >= 3) return;
+        for (const href of remintRelevantHrefs(body)) {
+          await walk(pathOnly(href), depth + 1);
+        }
+      }
+
+      await walk(`/s/${A}/draw`, 0);
+
+      // Fan-out: many prompt fresh follows for A (the 28 Oct threat model).
+      const fan = await Promise.all(
+        Array.from({ length: 8 }, async () => {
+          const stale = await req(`/s/${A}/draw`);
+          const f = parseFreshLink(stale.body);
+          if (!f) return null;
+          return followFresh(f.visitId, f.n);
+        }),
+      );
+      for (const r of fan) {
+        if (r?.id) note(r.id);
+      }
+      const gen1 = new Set(fan.map((r) => r?.id).filter(Boolean));
+
+      // Chain generation 2–3 via child's stale → fresh.
+      let chainOk = true;
+      const staleB = fan.find((r) => r?.kind === "stale");
+      const createdB = fan.find((r) => r?.kind === "created");
+      let bFresh = staleB?.fresh || null;
+      if (!bFresh && createdB?.id) {
+        // Re-follow A's fresh to get B's stale page with B's fresh link.
+        const staleA = await req(`/s/${A}/draw`);
+        const fA = parseFreshLink(staleA.body);
+        if (fA) {
+          const again = await followFresh(fA.visitId, fA.n);
+          if (again.kind === "stale") bFresh = again.fresh;
+        }
+      }
+      if (bFresh) {
+        const gen2 = await followFresh(bFresh.visitId, bFresh.n);
+        note(gen2.id);
+        if (gen2.kind === "created" || gen2.kind === "stale") {
+          let cFresh =
+            gen2.kind === "stale"
+              ? gen2.fresh
+              : null;
+          if (!cFresh && gen2.id) {
+            const staleFromParent = await followFresh(
+              bFresh.visitId,
+              bFresh.n,
+            );
+            if (staleFromParent.kind === "stale") cFresh = staleFromParent.fresh;
+          }
+          if (cFresh) {
+            const gen3 = await followFresh(cFresh.visitId, cFresh.n);
+            note(gen3.id);
+          }
+        }
+      } else {
+        chainOk = false;
+      }
+
+      record(
+        "004-7-fast-crawler",
+        minted.size <= 3 && gen1.size <= 1 && chainOk,
+        `minted=${minted.size} ids=${[...minted].join(",") || "none"} gen1=${gen1.size} chain=${chainOk}`,
+      );
+    }
+
+    // 8. Duplicate fresh: same link twice + two different fresh sigs for A
+    //    → exactly one child; later responses are B's stale (no draw/census).
+    {
+      const A = fakeVisitId();
+      const stale = await req(`/s/${A}/draw`);
+      const f1 = parseFreshLink(stale.body);
+      const stale2 = await req(`/s/${A}/draw`);
+      const f2 = parseFreshLink(stale2.body);
+      let ok = false;
+      let detail = "no-fresh";
+      if (f1 && f2) {
+        const first = await followFresh(f1.visitId, f1.n);
+        const secondSame = await followFresh(f1.visitId, f1.n);
+        const secondOther = await followFresh(f2.visitId, f2.n);
+        const childIds = new Set(
+          [first, secondSame, secondOther]
+            .map((r) => r.id)
+            .filter(Boolean),
+        );
+        const laterAreStale =
+          secondSame.kind === "stale" &&
+          secondOther.kind === "stale" &&
+          !hasDrawOrCensusLinks(secondSame.body) &&
+          !hasDrawOrCensusLinks(secondOther.body);
+        const firstCreated =
+          first.kind === "created" && first.patterns === 16;
+        ok =
+          firstCreated &&
+          laterAreStale &&
+          childIds.size === 1 &&
+          secondSame.id === first.id &&
+          secondOther.id === first.id;
+        detail = `first=${first.kind} same=${secondSame.kind} other=${secondOther.kind} children=${childIds.size} id=${first.id || "none"}`;
+      }
+      record("004-8-duplicate-fresh", ok, detail);
+    }
+
+    // 9. Concurrent fresh: two parallel valid fresh follows → exactly one child
+    {
+      const A = fakeVisitId();
+      const s1 = await req(`/s/${A}/draw`);
+      const s2 = await req(`/s/${A}/draw`);
+      const f1 = parseFreshLink(s1.body);
+      const f2 = parseFreshLink(s2.body);
+      let ok = false;
+      let detail = "no-fresh";
+      if (f1 && f2) {
+        const [a, b] = await Promise.all([
+          followFresh(f1.visitId, f1.n),
+          followFresh(f2.visitId, f2.n),
+        ]);
+        const ids = new Set([a.id, b.id].filter(Boolean));
+        const kinds = [a.kind, b.kind].sort().join("+");
+        // One created draw, one stale — or both stale if a third sneaked in;
+        // require exactly one distinct child id and no second created.
+        const created = [a, b].filter((r) => r.kind === "created");
+        const stales = [a, b].filter((r) => r.kind === "stale");
+        ok =
+          ids.size === 1 &&
+          created.length <= 1 &&
+          (created.length === 1
+            ? stales.length === 1 && stales[0].id === created[0].id
+            : stales.length === 2);
+        detail = `kinds=${kinds} ids=${ids.size} child=${[...ids][0] || "none"}`;
+      }
+      record("004-9-concurrent-fresh", ok, detail);
+    }
   }
 
   // 10. Decline write + refuse after drawing
@@ -743,17 +1213,16 @@ async function runIpUaCheck() {
 function writeReport() {
   const dir = path.join(ROOT, "docs", "debug-investigations");
   mkdirSync(dir, { recursive: true });
-  const out = path.join(dir, "003-era1-preview-smoke.md");
-  const existing = existsSync(out) ? readFileSync(out, "utf8") : "";
-  const withoutD = existing.replace(/\n## Run D[\s\S]*?(?=\n## |$)/, "\n");
+  const out = path.join(dir, "005-remint-loop-fix.md");
   const passed = results.filter((r) => r.pass).length;
-  const runD = `
-## Run D — growth fix, prod test-route 404s, superseded query
+  const remint = results.filter((r) => String(r.id).startsWith("004-"));
+  const remintPass = remint.filter((r) => r.pass).length;
+  const body = `# Remint loop fix — preview verification (spec 004)
 
 **Date:** ${new Date().toISOString()}
 **Preview deployment:** ${DEP}
-**Method:** Node \`fetch\` + protection bypass + test hooks
-**Automated:** **${passed}/${results.length}** checks in this run
+**Method:** Node \`fetch\` + protection bypass + test hooks (\`scripts/era1-smoke.mjs\`)
+**Automated:** **${passed}/${results.length}** checks in this run (spec 004 remint checks **${remintPass}/${remint.length}**)
 
 | Id | Result | Detail |
 |---|---|---|
@@ -764,16 +1233,21 @@ ${results
   )
   .join("\n")}
 
+## Spec 004 checklist
+
+- [ ] 1 Stale draw → one signed \`/fresh\`, zero pattern links, no remint
+- [ ] 2 Stale write → redirect to draw stale page, no remint
+- [ ] 3 Fresh within TTL → new visit, 16 pattern links
+- [ ] 4 Fresh expired → HTML dead end, no signed links, no \`/\`
+- [ ] 5 Late crawler: follow all stale-page links after TTL → zero new visits
+- [ ] 6 Normal flow + expired sig on own visit → re-render, no remint
+- [ ] 7 Fast crawler depth-3 → ≤ 3 visits (one per generation)
+- [ ] 8 Duplicate fresh → one child; later responses are child stale
+- [ ] 9 Concurrent fresh → exactly one child
+- [ ] llms.txt + production \`/api/test/*\` → 404
+
 `;
-  let next = withoutD;
-  if (next.includes("## Checklist")) {
-    next = next.replace("## Checklist", runD + "## Checklist");
-  } else if (next.includes("## Notes")) {
-    next = next.replace("## Notes", runD + "## Notes");
-  } else {
-    next = next.trimEnd() + "\n" + runD;
-  }
-  writeFileSync(out, next);
+  writeFileSync(out, body);
   console.log("Wrote", out);
 }
 

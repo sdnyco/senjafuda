@@ -2,12 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { firstCensusFieldId } from "@/lib/era1-vocab";
 import { writeDrawing, applySweepHit } from "@/lib/era1-write";
 import { verifySignature } from "@/lib/link-sign";
-import {
-  checkDrawLimit,
-  checkWriteLimit,
-  checkAndIncrGlobalMint,
-  checkMintSourceLimit,
-} from "@/lib/rate-limit";
+import { checkDrawLimit, checkWriteLimit } from "@/lib/rate-limit";
 import { skipSourceCaps } from "@/lib/test-hooks";
 import { isValidVisitIdFormat } from "@/lib/visit-id";
 import { isValidPatternId } from "@/lib/era1-vocab";
@@ -16,7 +11,6 @@ import {
   incrementLateFetches,
   isVisitUnusable,
   markVisitRateLimited,
-  remintFrom,
 } from "@/lib/visits";
 import {
   redirectIfUnavailable,
@@ -82,19 +76,10 @@ export async function GET(request: NextRequest, ctx: Ctx) {
     }
   }
 
-  let visit = await getVisit(v);
+  const visit = await getVisit(v);
   if (!visit || (await isVisitUnusable(visit))) {
-    const mintOk = await checkMintSourceLimit();
-    const globalOk = await checkAndIncrGlobalMint();
-    const closedMint = redirectIfUnavailable(origin, mintOk, globalOk);
-    if (closedMint) return closedMint;
-    if (mintOk.success && globalOk.success) {
-      visit = await remintFrom(visit?.id ?? v, request.headers.get("user-agent"));
-      return redirectTo(`${origin}/s/${visit.id}/draw?note=stale`);
-    }
-    return htmlNote(
-      "<p>Nothing was recorded from this link. New visits are unavailable.</p>",
-    );
+    // Spec 004: no auto-remint; shared stale surface on draw GET.
+    return redirectTo(`${origin}/s/${v}/draw`);
   }
 
   {

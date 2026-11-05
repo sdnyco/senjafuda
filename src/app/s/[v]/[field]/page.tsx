@@ -1,7 +1,11 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { Shell } from "@/components/Shell";
-import { VisitClosed, RateLimitedPage, NothingRecorded } from "@/components/StatusPages";
+import {
+  StaleVisitPage,
+  RateLimitedPage,
+  NothingRecorded,
+} from "@/components/StatusPages";
 import { CanvasPre } from "@/components/CanvasPre";
 import { getDb } from "@/db";
 import { getFrameSize, loadValidCells } from "@/lib/canvas";
@@ -46,39 +50,17 @@ export default async function CensusPage({ params, searchParams }: Props) {
   pageIfUnavailable(sGet);
   if (!sGet.success) return <RateLimitedPage />;
 
-  const visit = await getVisit(v);
-  if (!visit) {
-    return (
-      <NothingRecorded>
-        <p>
-          This visit was not found. Nothing was recorded from this link.
-        </p>
-      </NothingRecorded>
-    );
-  }
+  const h = await headers();
+  const hooks = testHooksAllowed(h.get("x-senjafuda-test"));
+  const ttl = hooks
+    ? parseTtlOverride(h.get("x-senjafuda-test-ttl"))
+    : undefined;
 
-  if (
-    visit.status === "signed" ||
-    visit.status === "declined" ||
-    visit.status === "branched" ||
-    (await isVisitUnusable(visit))
-  ) {
-    // R1: read pages on terminal/unknown → no remint; offer fresh link
-    if (
-      visit.status === "signed" ||
-      visit.status === "declined" ||
-      visit.status === "branched"
-    ) {
-      const fresh = signFreshLink({ visitId: visit.id });
-      return <VisitClosed freshHref={`/s/${visit.id}/fresh?n=${fresh}`} />;
-    }
-    return (
-      <NothingRecorded>
-        <p>
-          This visit is no longer open. Nothing was recorded from this link.
-        </p>
-      </NothingRecorded>
-    );
+  const visit = await getVisit(v);
+  // Spec 004 R1.9: any unusable / unknown → same single-fresh stale page.
+  if (!visit || (await isVisitUnusable(visit))) {
+    const freshN = signFreshLink({ visitId: visit?.id ?? v, ttlSec: ttl });
+    return <StaleVisitPage visitId={visit?.id ?? v} freshN={freshN} />;
   }
 
   if (visit.status !== "drawn") {
@@ -101,34 +83,34 @@ export default async function CensusPage({ params, searchParams }: Props) {
     redirectTemporarilyClosedPage();
   }
   if (sweep === "branched" || sweep === "swept") {
-    const fresh = signFreshLink({ visitId: visit.id });
-    return <VisitClosed freshHref={`/s/${visit.id}/fresh?n=${fresh}`} />;
+    const freshN = signFreshLink({ visitId: visit.id, ttlSec: ttl });
+    return <StaleVisitPage visitId={visit.id} freshN={freshN} />;
   }
 
   const vocab = loadEra1Vocab();
   const fieldDef = getCensusField(field, vocab);
   if (!fieldDef) notFound();
 
-  const h = await headers();
-  const hooks = testHooksAllowed(h.get("x-senjafuda-test"));
-  const ttl = hooks
-    ? parseTtlOverride(h.get("x-senjafuda-test-ttl"))
-    : undefined;
-
   const options = orderedCensusOptions(fieldDef, visit.id, vocab);
   const db = getDb();
   const frameSize = await getFrameSize(db);
   const cells = await loadValidCells(db);
+
   const finishN = signFinishLink({ visitId: visit.id, ttlSec: ttl });
-  const skipN = signSkipLink({ visitId: visit.id, field, ttlSec: ttl });
-  const note =
-    sp.note === "expired"
-      ? "That link had expired, so nothing was recorded. Here is the step again."
-      : null;
+  const skipN = signSkipLink({
+    visitId: visit.id,
+    field,
+    ttlSec: ttl,
+  });
 
   return (
     <Shell>
-      {note ? <p className="banner">{note}</p> : null}
+      {sp.note === "expired" ? (
+        <p className="banner">
+          That link had expired, so nothing was recorded. Here is the step
+          again.
+        </p>
+      ) : null}
       <h1>{fieldDef.question}</h1>
       <CanvasPre frameSize={frameSize} cells={cells} />
       <ul className="option-list">
@@ -153,7 +135,7 @@ export default async function CensusPage({ params, searchParams }: Props) {
       </ul>
       <nav className="meta-nav">
         <a
-          href={`/s/${visit.id}/${field}/_skipped?n=${encodeURIComponent(skipN)}`}
+          href={`/s/${visit.id}/${field}/${vocab.skip_value}?n=${encodeURIComponent(skipN)}`}
           rel="nofollow"
         >
           → Skip this question

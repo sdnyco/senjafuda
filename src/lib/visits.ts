@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { drawings, visits, type Drawing, type Visit } from "@/db/schema";
 import {
@@ -17,6 +17,7 @@ const DRAWN_USABLE_MS = 30 * 60 * 1000;
 export async function issueVisit(
   uaHeader: string | null,
   inheritedFromPublicId: string | null = null,
+  freshParentPublicId: string | null = null,
 ): Promise<Visit> {
   const db = getDb();
   const classified = classifyUserAgent(uaHeader);
@@ -37,6 +38,7 @@ export async function issueVisit(
     rateLimited: false,
     lateFetches: 0,
     inheritedFrom: inheritedFromPublicId,
+    freshParent: freshParentPublicId,
     completedAt: null,
     updatedAt: now,
   };
@@ -107,22 +109,100 @@ export async function isVisitUnusable(visit: Visit): Promise<boolean> {
   return false;
 }
 
+function isUniqueViolation(err: unknown): boolean {
+  const parts: string[] = [];
+  let cur: unknown = err;
+  for (let i = 0; i < 4 && cur; i++) {
+    if (cur instanceof Error) {
+      parts.push(cur.message);
+      const code = (cur as { code?: string }).code;
+      if (code === "23505") return true;
+      cur = (cur as { cause?: unknown }).cause;
+      continue;
+    }
+    parts.push(String(cur));
+    break;
+  }
+  return /unique|duplicate|23505/i.test(parts.join("\n"));
+}
+
+/**
+ * Spec 004 R2: child of A is a visit with fresh_parent = public_id(A),
+ * or (pre-R2) the earliest visit with inherited_from = public_id(A).
+ */
+export async function findExistingFreshChild(
+  parentPublicId: string,
+): Promise<Visit | null> {
+  const db = getDb();
+  const byFresh = await db
+    .select()
+    .from(visits)
+    .where(eq(visits.freshParent, parentPublicId))
+    .limit(1);
+  if (byFresh[0]) return byFresh[0];
+
+  const byInherited = await db
+    .select()
+    .from(visits)
+    .where(eq(visits.inheritedFrom, parentPublicId))
+    .orderBy(asc(visits.issuedAt), asc(visits.id))
+    .limit(1);
+  return byInherited[0] ?? null;
+}
+
+export type RemintResult =
+  | { kind: "created"; visit: Visit }
+  | { kind: "existing"; visit: Visit };
+
+/**
+ * Spec 004 R2: at most one child remint per parent.
+ * Sets both inherited_from and fresh_parent to public_id(parent) when salt
+ * is available (including unknown well-formed parent ids).
+ */
+export async function remintFromOrExisting(
+  oldVisitId: string,
+  uaHeader: string | null,
+): Promise<RemintResult> {
+  let parentPublicId: string | null = null;
+  try {
+    parentPublicId = visitPublicId(oldVisitId);
+  } catch {
+    parentPublicId = null;
+  }
+
+  if (parentPublicId) {
+    const existing = await findExistingFreshChild(parentPublicId);
+    if (existing) {
+      return { kind: "existing", visit: existing };
+    }
+  }
+
+  try {
+    const visit = await issueVisit(
+      uaHeader,
+      parentPublicId,
+      parentPublicId,
+    );
+    return { kind: "created", visit };
+  } catch (err) {
+    if (parentPublicId && isUniqueViolation(err)) {
+      const winner = await findExistingFreshChild(parentPublicId);
+      if (winner) return { kind: "existing", visit: winner };
+    }
+    throw err;
+  }
+}
+
+/** @deprecated Prefer remintFromOrExisting (spec 004 R2). */
 export async function remintFrom(
   oldVisitId: string | null,
   uaHeader: string | null,
 ): Promise<Visit> {
-  let inherited: string | null = null;
-  if (oldVisitId) {
-    const old = await getVisit(oldVisitId);
-    if (old) {
-      try {
-        inherited = visitPublicId(old.id);
-      } catch {
-        inherited = null;
-      }
-    }
+  if (!oldVisitId) {
+    return issueVisit(uaHeader, null, null);
   }
-  return issueVisit(uaHeader, inherited);
+  const result = await remintFromOrExisting(oldVisitId, uaHeader);
+  return result.visit;
 }
 
 /** Drawing still within the 30m census window (R2). */

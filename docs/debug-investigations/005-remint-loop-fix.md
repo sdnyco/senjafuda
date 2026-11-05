@@ -1,9 +1,20 @@
 # Remint loop fix — preview verification (spec 004)
 
-**Date:** 2026-11-05T13:17:00.000Z  
-**Commits:** `b0ec654` (R2) on `remint-loop-fix`  
-**Preview deployment:** https://senjafuda-9c9dv0mmb-sdnycos-projects.vercel.app  
+**Date:** 2026-11-05T13:25:00.000Z  
+**Commit:** `3597601` (additive `fresh_parent` R2)  
+**Preview deployment:** https://senjafuda-iabpetd3z-sdnycos-projects.vercel.app  
+**Git branch for Preview:** `remint-loop-fix-v2` (new Neon preview branch from main — the withdrawn `0003` that UPDATEd `inherited_from` never ran on this database)  
+**PR branch:** `remint-loop-fix` (same commit)  
 **Method:** Node `fetch` + protection bypass + test hooks (`scripts/era1-smoke.mjs`)
+
+## Migration 0003 purity
+
+`drizzle/0003_fresh_parent.sql` contains **no `UPDATE` or `DELETE`** of existing rows. It only:
+
+1. `ALTER TABLE "visits" ADD COLUMN IF NOT EXISTS "fresh_parent" text;`
+2. `CREATE UNIQUE INDEX IF NOT EXISTS "visits_fresh_parent_uidx" ON "visits" ("fresh_parent") WHERE "fresh_parent" IS NOT NULL;`
+
+The earlier draft that cleared duplicate `inherited_from` values was withdrawn before production and is not in the tree.
 
 ## Spec 004 checklist
 
@@ -38,14 +49,9 @@
 | 004-7-fast-crawler | PASS | minted=3 gen1=1 chain=true |
 | 004-8-duplicate-fresh | PASS | created then stale+stale; 1 child |
 | 004-9-concurrent-fresh | PASS | created+stale; 1 child |
-| 10-decline | PASS | |
-| 11-form | PASS | |
-| 12-census-correction | PASS | |
-| 14-export | PASS | |
-| 15-no-ip-ua | PASS | |
-| prod-test-routes-404 | PASS | |
+| 10–15, prod-test-routes-404 | PASS | |
 
 ## Notes
 
-- Migration `0003_inherited_from_unique` applied on Preview build (dedupe then unique partial index).
-- R2 turns fast-crawler fan-out into a chain (≤1 child per parent).
+- R2 race safety is on `fresh_parent` (unique partial index). `inherited_from` remains lineage-only and is still set on new remints; pre-R2 duplicates are untouched.
+- “Child exists” = `fresh_parent = public_id(A)` or earliest `inherited_from = public_id(A)`.

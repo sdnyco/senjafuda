@@ -1,14 +1,22 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { FreshLinkExpiredPage } from "@/components/StatusPages";
-import { verifySignature } from "@/lib/link-sign";
+import {
+  FreshLinkExpiredPage,
+  StaleVisitPage,
+} from "@/components/StatusPages";
+import { signFreshLink, verifySignature } from "@/lib/link-sign";
+import { visitPublicId } from "@/lib/public-id-env";
 import {
   checkAndIncrGlobalMint,
   checkMintSourceLimit,
 } from "@/lib/rate-limit";
 import { pageIfUnavailable } from "@/lib/upstash-response";
+import { parseTtlOverride, testHooksAllowed } from "@/lib/test-hooks";
 import { isValidVisitIdFormat } from "@/lib/visit-id";
-import { remintFrom } from "@/lib/visits";
+import {
+  getVisitByInheritedFrom,
+  remintFromOrExisting,
+} from "@/lib/visits";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +28,7 @@ type Props = {
 /**
  * Spec 004: the only remint path. Invalid/expired signature → HTML dead end
  * (not a redirect to `/`, which would mint).
+ * R2: at most one child per parent; later follows get the child's stale page.
  */
 export default async function FreshPage({ params, searchParams }: Props) {
   const { v } = await params;
@@ -40,6 +49,27 @@ export default async function FreshPage({ params, searchParams }: Props) {
     return <FreshLinkExpiredPage />;
   }
 
+  const h = await headers();
+  const hooks = testHooksAllowed(h.get("x-senjafuda-test"));
+  const ttl = hooks
+    ? parseTtlOverride(h.get("x-senjafuda-test-ttl"))
+    : undefined;
+
+  let inherited: string | null = null;
+  try {
+    inherited = visitPublicId(v);
+  } catch {
+    inherited = null;
+  }
+
+  if (inherited) {
+    const existing = await getVisitByInheritedFrom(inherited);
+    if (existing) {
+      const freshN = signFreshLink({ visitId: existing.id, ttlSec: ttl });
+      return <StaleVisitPage visitId={existing.id} freshN={freshN} />;
+    }
+  }
+
   const mintOk = await checkMintSourceLimit();
   const globalOk = await checkAndIncrGlobalMint();
   pageIfUnavailable(mintOk, globalOk);
@@ -47,7 +77,15 @@ export default async function FreshPage({ params, searchParams }: Props) {
     redirect("/");
   }
 
-  const h = await headers();
-  const visit = await remintFrom(v, h.get("user-agent"));
-  redirect(`/s/${visit.id}/draw?note=stale`);
+  const result = await remintFromOrExisting(v, h.get("user-agent"));
+  if (result.kind === "existing") {
+    // Lost the insert race: show the winner's stale page, not its draw step.
+    const freshN = signFreshLink({
+      visitId: result.visit.id,
+      ttlSec: ttl,
+    });
+    return <StaleVisitPage visitId={result.visit.id} freshN={freshN} />;
+  }
+
+  redirect(`/s/${result.visit.id}/draw?note=stale`);
 }

@@ -72,4 +72,26 @@ For **`GET /s/{v}/draw`** and **every write link** (draw, census, skip, finish, 
 10. Residual risk accepted (polling stale URLs + prompt `fresh` follows are bounded by the caps).
 11. The expired or invalid `fresh` must be an **HTML dead end**, not a redirect. Note it explicitly in the implementation summary.
 
-Report to `/docs/debug-investigations/005-remint-loop-fix.md`. Implementation summary to `/docs/implementation-summaries/004-remint-loop-fix.md`. Open a PR; don't merge.
+Report to `/docs/debug-investigations/005-remint-loop-fix.md`.
+
+---
+
+## Revision 2: fast crawlers (2026-11-05, after PR #4 review)
+
+> **Where this section conflicts with anything above, this section wins.**
+
+**Why:** the 2026-10-28 burst (5,000 visits) had only 6 late fetches. The crawler followed links **within** the 5-minute TTL. With R1 alone, a fast crawler still fans out: each stale-page hit renders a *new* signed `fresh` link, and ~15 prompt follows mint ~15 visits, each with 16 pattern links. The smoke check 004-5 only simulated a *late* crawler.
+
+**Rule: each visit spawns at most one fresh visit.**
+- `GET /s/{A}/fresh` with a valid signature: if **no visit exists with `inherited_from = public_id(A)`**, mint child B (as now) and redirect to B's draw step.
+- If **such a child B already exists**, **mint nothing** and render **B's stale page** (`StaleVisitPage` for B, with B's own signed `fresh` link). **Never** redirect a later follower into B's draw or census pages (that would let a second agent answer the first agent's census).
+- Make it race-safe: two simultaneous fresh follows for A must yield at most one child (e.g. a unique partial index on `inherited_from` where not null, insert-and-catch-conflict, then render the stale page for the winner). Additive migration, re-runnable.
+- Index `inherited_from` for the lookup.
+
+**Effect:** a fast crawler produces a **chain** (A → B → C …, one visit per generation, bounded by the 60/h per-source mint limit), not a tree.
+
+**Additional verification:**
+- **004-7 fast crawler:** starting from a stale draw page, follow **every** link **immediately**, recursively to depth 3 → visits minted **≤ 3** (one per generation), never more.
+- **004-8 duplicate fresh:** follow the same `/s/A/fresh` link twice (and two different fresh links for A) → exactly one child; the second response is B's stale page, with no draw or census links of B.
+- **004-9 concurrent fresh:** two parallel valid fresh follows for A → exactly one child.
+- Re-run 004-1…6. Implementation summary to `/docs/implementation-summaries/004-remint-loop-fix.md`. Open a PR; don't merge.

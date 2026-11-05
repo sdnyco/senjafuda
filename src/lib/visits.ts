@@ -107,22 +107,84 @@ export async function isVisitUnusable(visit: Visit): Promise<boolean> {
   return false;
 }
 
+function isUniqueViolation(err: unknown): boolean {
+  const parts: string[] = [];
+  let cur: unknown = err;
+  for (let i = 0; i < 4 && cur; i++) {
+    if (cur instanceof Error) {
+      parts.push(cur.message);
+      const code = (cur as { code?: string }).code;
+      if (code === "23505") return true;
+      cur = (cur as { cause?: unknown }).cause;
+      continue;
+    }
+    parts.push(String(cur));
+    break;
+  }
+  return /unique|duplicate|23505/i.test(parts.join("\n"));
+}
+
+export async function getVisitByInheritedFrom(
+  parentPublicId: string,
+): Promise<Visit | null> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(visits)
+    .where(eq(visits.inheritedFrom, parentPublicId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export type RemintResult =
+  | { kind: "created"; visit: Visit }
+  | { kind: "existing"; visit: Visit };
+
+/**
+ * Spec 004 R2: at most one child remint per parent.
+ * `inherited_from` is always public_id(parentId) when the salt is available,
+ * including for unknown but well-formed parent ids.
+ */
+export async function remintFromOrExisting(
+  oldVisitId: string,
+  uaHeader: string | null,
+): Promise<RemintResult> {
+  let inherited: string | null = null;
+  try {
+    inherited = visitPublicId(oldVisitId);
+  } catch {
+    inherited = null;
+  }
+
+  if (inherited) {
+    const existing = await getVisitByInheritedFrom(inherited);
+    if (existing) {
+      return { kind: "existing", visit: existing };
+    }
+  }
+
+  try {
+    const visit = await issueVisit(uaHeader, inherited);
+    return { kind: "created", visit };
+  } catch (err) {
+    if (inherited && isUniqueViolation(err)) {
+      const winner = await getVisitByInheritedFrom(inherited);
+      if (winner) return { kind: "existing", visit: winner };
+    }
+    throw err;
+  }
+}
+
+/** @deprecated Prefer remintFromOrExisting (spec 004 R2). */
 export async function remintFrom(
   oldVisitId: string | null,
   uaHeader: string | null,
 ): Promise<Visit> {
-  let inherited: string | null = null;
-  if (oldVisitId) {
-    const old = await getVisit(oldVisitId);
-    if (old) {
-      try {
-        inherited = visitPublicId(old.id);
-      } catch {
-        inherited = null;
-      }
-    }
+  if (!oldVisitId) {
+    return issueVisit(uaHeader, null);
   }
-  return issueVisit(uaHeader, inherited);
+  const result = await remintFromOrExisting(oldVisitId, uaHeader);
+  return result.visit;
 }
 
 /** Drawing still within the 30m census window (R2). */

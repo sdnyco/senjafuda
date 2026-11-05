@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   integer,
@@ -6,6 +7,7 @@ import {
   text,
   timestamp,
   bigserial,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 /** Pilot tables — untouched by era 1; kept for archive exports. */
@@ -50,24 +52,33 @@ export type TokenStatus =
   | "expired";
 
 /** Era 1 */
-export const visits = pgTable("visits", {
-  id: text("id").primaryKey(),
-  era: integer("era").notNull().default(1),
-  issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  vocabVersion: text("vocab_version").notNull(),
-  uaRulesVersion: integer("ua_rules_version").notNull(),
-  uaClass: text("ua_class").notNull(),
-  uaFamily: text("ua_family").notNull(),
-  uaSuspect: boolean("ua_suspect").notNull().default(false),
-  status: text("status").notNull(),
-  swept: boolean("swept").notNull().default(false),
-  rateLimited: boolean("rate_limited").notNull().default(false),
-  lateFetches: integer("late_fetches").notNull().default(0),
-  inheritedFrom: text("inherited_from"),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const visits = pgTable(
+  "visits",
+  {
+    id: text("id").primaryKey(),
+    era: integer("era").notNull().default(1),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    vocabVersion: text("vocab_version").notNull(),
+    uaRulesVersion: integer("ua_rules_version").notNull(),
+    uaClass: text("ua_class").notNull(),
+    uaFamily: text("ua_family").notNull(),
+    uaSuspect: boolean("ua_suspect").notNull().default(false),
+    status: text("status").notNull(),
+    swept: boolean("swept").notNull().default(false),
+    rateLimited: boolean("rate_limited").notNull().default(false),
+    lateFetches: integer("late_fetches").notNull().default(0),
+    /** Parent visit public_id; unique when set (spec 004 R2). */
+    inheritedFrom: text("inherited_from"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("visits_inherited_from_uidx")
+      .on(t.inheritedFrom)
+      .where(sql`${t.inheritedFrom} IS NOT NULL`),
+  ],
+);
 
 export const drawings = pgTable("drawings", {
   id: bigserial("id", { mode: "number" }).primaryKey(),

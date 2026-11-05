@@ -210,9 +210,78 @@ function isFreshExpiredPage(html) {
   );
 }
 
-/** Well-formed visit id that is vanishingly unlikely to exist. */
+/** Well-formed visit id that is vanishingly unlikely to exist (fresh each call). */
 function fakeVisitId() {
-  return "ZZZZZZZZZZZZZZZZZZZZZZZZZZ";
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let s = "";
+  for (let i = 0; i < 26; i++) {
+    s += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return s;
+}
+
+function pathOnly(urlOrPath) {
+  if (!urlOrPath) return "";
+  return urlOrPath.replace(/^https?:\/\/[^/]+/, "");
+}
+
+/** /s/ links that do not write (skip pattern/census/decline/finish writes). */
+function remintRelevantHrefs(html) {
+  return allHrefs(html).filter((h) => {
+    if (!h.includes("/s/")) return false;
+    if (h.includes("/_next/") || h.includes("favicon")) return false;
+    if (/\/draw\/p\d+/.test(h)) return false;
+    if (/\/decline\/[a-z0-9_]+/.test(h)) return false;
+    if (/\/(arrival|decider|family|return)\/[a-z0-9_]+/.test(h)) return false;
+    if (/\/finish\?/.test(h)) return false;
+    return true;
+  });
+}
+
+function hasDrawOrCensusLinks(html) {
+  return (
+    /\/draw\/p\d+/.test(html) ||
+    /\/(arrival|decider|family|return)(?:\/|"|\?)/.test(html)
+  );
+}
+
+/** Follow a fresh link; classify created draw vs child stale vs expired. */
+async function followFresh(visitId, n) {
+  const res = await req(
+    `/s/${visitId}/fresh?n=${encodeURIComponent(n)}`,
+    { redirect: "manual" },
+  );
+  const loc = pathOnly(res.location || "");
+  if (res.status >= 300 && res.status < 400 && /\/draw/.test(loc)) {
+    const draw = await req(loc);
+    const id =
+      loc.match(/\/s\/([A-Z2-7]{26})\//)?.[1] || extractVisitId(draw.body);
+    return {
+      kind: "created",
+      id,
+      body: draw.body,
+      patterns: patternLinkCount(draw.body),
+    };
+  }
+  if (isStalePage(res.body)) {
+    const fresh = parseFreshLink(res.body);
+    return {
+      kind: "stale",
+      id: fresh?.visitId || null,
+      body: res.body,
+      fresh,
+    };
+  }
+  if (isFreshExpiredPage(res.body)) {
+    return { kind: "expired", id: null, body: res.body };
+  }
+  return {
+    kind: "other",
+    id: extractVisitId(res.body),
+    body: res.body,
+    status: res.status,
+    loc,
+  };
 }
 
 function parseDeclineLink(html) {
@@ -648,6 +717,175 @@ async function runRemaining() {
       Boolean(ownId) && normalOk && lateOk,
       `ownId=${ownId || "none"} finish=${normalOk} lateReRender=${lateOk}`,
     );
+
+    // 7. Fast crawler: follow /s/ links immediately to depth 3 + fan-out fresh
+    //    follows on the same parent → ≤ 3 visits (one per generation).
+    {
+      const A = fakeVisitId();
+      const minted = new Set();
+      const note = (id) => {
+        if (id && id !== A) minted.add(id);
+      };
+
+      async function walk(urlPath, depth) {
+        if (depth > 3) return;
+        const res = await req(urlPath, { redirect: "manual" });
+        const loc = pathOnly(res.location || "");
+        if (loc) {
+          const id = loc.match(/\/s\/([A-Z2-7]{26})\//)?.[1];
+          note(id);
+        }
+        let body = res.body;
+        if (res.status >= 300 && res.status < 400 && loc) {
+          const followed = await req(loc);
+          body = followed.body;
+          note(extractVisitId(body));
+          if (depth < 3) {
+            for (const href of remintRelevantHrefs(body)) {
+              await walk(pathOnly(href), depth + 1);
+            }
+          }
+          return;
+        }
+        if (patternLinkCount(body) === 16) note(extractVisitId(body));
+        if (isStalePage(body)) {
+          const f = parseFreshLink(body);
+          if (f) note(f.visitId);
+        }
+        if (depth >= 3) return;
+        for (const href of remintRelevantHrefs(body)) {
+          await walk(pathOnly(href), depth + 1);
+        }
+      }
+
+      await walk(`/s/${A}/draw`, 0);
+
+      // Fan-out: many prompt fresh follows for A (the 28 Oct threat model).
+      const fan = await Promise.all(
+        Array.from({ length: 8 }, async () => {
+          const stale = await req(`/s/${A}/draw`);
+          const f = parseFreshLink(stale.body);
+          if (!f) return null;
+          return followFresh(f.visitId, f.n);
+        }),
+      );
+      for (const r of fan) {
+        if (r?.id) note(r.id);
+      }
+      const gen1 = new Set(fan.map((r) => r?.id).filter(Boolean));
+
+      // Chain generation 2–3 via child's stale → fresh.
+      let chainOk = true;
+      const staleB = fan.find((r) => r?.kind === "stale");
+      const createdB = fan.find((r) => r?.kind === "created");
+      let bFresh = staleB?.fresh || null;
+      if (!bFresh && createdB?.id) {
+        // Re-follow A's fresh to get B's stale page with B's fresh link.
+        const staleA = await req(`/s/${A}/draw`);
+        const fA = parseFreshLink(staleA.body);
+        if (fA) {
+          const again = await followFresh(fA.visitId, fA.n);
+          if (again.kind === "stale") bFresh = again.fresh;
+        }
+      }
+      if (bFresh) {
+        const gen2 = await followFresh(bFresh.visitId, bFresh.n);
+        note(gen2.id);
+        if (gen2.kind === "created" || gen2.kind === "stale") {
+          let cFresh =
+            gen2.kind === "stale"
+              ? gen2.fresh
+              : null;
+          if (!cFresh && gen2.id) {
+            const staleFromParent = await followFresh(
+              bFresh.visitId,
+              bFresh.n,
+            );
+            if (staleFromParent.kind === "stale") cFresh = staleFromParent.fresh;
+          }
+          if (cFresh) {
+            const gen3 = await followFresh(cFresh.visitId, cFresh.n);
+            note(gen3.id);
+          }
+        }
+      } else {
+        chainOk = false;
+      }
+
+      record(
+        "004-7-fast-crawler",
+        minted.size <= 3 && gen1.size <= 1 && chainOk,
+        `minted=${minted.size} ids=${[...minted].join(",") || "none"} gen1=${gen1.size} chain=${chainOk}`,
+      );
+    }
+
+    // 8. Duplicate fresh: same link twice + two different fresh sigs for A
+    //    → exactly one child; later responses are B's stale (no draw/census).
+    {
+      const A = fakeVisitId();
+      const stale = await req(`/s/${A}/draw`);
+      const f1 = parseFreshLink(stale.body);
+      const stale2 = await req(`/s/${A}/draw`);
+      const f2 = parseFreshLink(stale2.body);
+      let ok = false;
+      let detail = "no-fresh";
+      if (f1 && f2) {
+        const first = await followFresh(f1.visitId, f1.n);
+        const secondSame = await followFresh(f1.visitId, f1.n);
+        const secondOther = await followFresh(f2.visitId, f2.n);
+        const childIds = new Set(
+          [first, secondSame, secondOther]
+            .map((r) => r.id)
+            .filter(Boolean),
+        );
+        const laterAreStale =
+          secondSame.kind === "stale" &&
+          secondOther.kind === "stale" &&
+          !hasDrawOrCensusLinks(secondSame.body) &&
+          !hasDrawOrCensusLinks(secondOther.body);
+        const firstCreated =
+          first.kind === "created" && first.patterns === 16;
+        ok =
+          firstCreated &&
+          laterAreStale &&
+          childIds.size === 1 &&
+          secondSame.id === first.id &&
+          secondOther.id === first.id;
+        detail = `first=${first.kind} same=${secondSame.kind} other=${secondOther.kind} children=${childIds.size} id=${first.id || "none"}`;
+      }
+      record("004-8-duplicate-fresh", ok, detail);
+    }
+
+    // 9. Concurrent fresh: two parallel valid fresh follows → exactly one child
+    {
+      const A = fakeVisitId();
+      const s1 = await req(`/s/${A}/draw`);
+      const s2 = await req(`/s/${A}/draw`);
+      const f1 = parseFreshLink(s1.body);
+      const f2 = parseFreshLink(s2.body);
+      let ok = false;
+      let detail = "no-fresh";
+      if (f1 && f2) {
+        const [a, b] = await Promise.all([
+          followFresh(f1.visitId, f1.n),
+          followFresh(f2.visitId, f2.n),
+        ]);
+        const ids = new Set([a.id, b.id].filter(Boolean));
+        const kinds = [a.kind, b.kind].sort().join("+");
+        // One created draw, one stale — or both stale if a third sneaked in;
+        // require exactly one distinct child id and no second created.
+        const created = [a, b].filter((r) => r.kind === "created");
+        const stales = [a, b].filter((r) => r.kind === "stale");
+        ok =
+          ids.size === 1 &&
+          created.length <= 1 &&
+          (created.length === 1
+            ? stales.length === 1 && stales[0].id === created[0].id
+            : stales.length === 2);
+        detail = `kinds=${kinds} ids=${ids.size} child=${[...ids][0] || "none"}`;
+      }
+      record("004-9-concurrent-fresh", ok, detail);
+    }
   }
 
   // 10. Decline write + refuse after drawing
@@ -1001,9 +1239,12 @@ ${results
 - [ ] 2 Stale write → redirect to draw stale page, no remint
 - [ ] 3 Fresh within TTL → new visit, 16 pattern links
 - [ ] 4 Fresh expired → HTML dead end, no signed links, no \`/\`
-- [ ] 5 Crawler: follow all stale-page links after TTL → zero new visits
+- [ ] 5 Late crawler: follow all stale-page links after TTL → zero new visits
 - [ ] 6 Normal flow + expired sig on own visit → re-render, no remint
-- [ ] 7 \`/llms.txt\` new line; production \`/api/test/*\` → 404 (manual / prod check)
+- [ ] 7 Fast crawler depth-3 → ≤ 3 visits (one per generation)
+- [ ] 8 Duplicate fresh → one child; later responses are child stale
+- [ ] 9 Concurrent fresh → exactly one child
+- [ ] llms.txt + production \`/api/test/*\` → 404
 
 `;
   writeFileSync(out, body);

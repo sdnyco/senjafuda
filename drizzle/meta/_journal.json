@@ -22,6 +22,13 @@
       "when": 1760976000000,
       "tag": "0002_era1",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1762344000000,
+      "tag": "0003_inherited_from_unique",
+      "breakpoints": true
     }
   ]
 }

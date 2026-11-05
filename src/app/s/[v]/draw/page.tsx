@@ -1,8 +1,8 @@
 import { headers } from "next/headers";
+import { notFound } from "next/navigation";
 import { Shell } from "@/components/Shell";
 import { CanvasPre } from "@/components/CanvasPre";
 import {
-  NothingRecorded,
   RateLimitedPage,
   StaleVisitPage,
 } from "@/components/StatusPages";
@@ -44,11 +44,7 @@ export default async function DrawPage({ params, searchParams }: Props) {
   const h = await headers();
 
   if (!isValidVisitIdFormat(v)) {
-    return (
-      <NothingRecorded>
-        <p>Nothing was recorded from this link.</p>
-      </NothingRecorded>
-    );
+    notFound();
   }
 
   const sGet = await checkSGetLimit();

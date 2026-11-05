@@ -95,3 +95,14 @@ Report to `/docs/debug-investigations/005-remint-loop-fix.md`.
 - **004-8 duplicate fresh:** follow the same `/s/A/fresh` link twice (and two different fresh links for A) → exactly one child; the second response is B's stale page, with no draw or census links of B.
 - **004-9 concurrent fresh:** two parallel valid fresh follows for A → exactly one child.
 - Re-run 004-1…6. Implementation summary to `/docs/implementation-summaries/004-remint-loop-fix.md`. Open a PR; don't merge.
+
+## Revision 3: no minting links on error pages (2026-11-05, after production check)
+
+> **Where this section conflicts with anything above, this section wins.**
+
+The production check found that a malformed visit id on `/s/{v}/draw` renders `NothingRecorded` (200) with a link to `/`, which mints. R1 assumed a 404.
+
+1. `/s/{v}/draw` with a malformed id → `notFound()`, matching `/fresh` and `/s/{v}/[field]`.
+2. `NothingRecorded` drops its "Start a fresh visit" link to `/`. It keeps `/record`. It is only rendered for invalid or unusable states, so the R1 rule applies to it too: no minting links on pages a crawler reaches from a broken or stale link. A person reaches `/` from `/record`, one hop deeper.
+3. Smoke: add **004-10** (malformed draw → 404) and **004-11** (every page rendered by `NothingRecorded`, `StaleVisitPage` and `FreshLinkExpiredPage` has no `href="/"`).
+

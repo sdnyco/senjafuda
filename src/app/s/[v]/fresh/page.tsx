@@ -14,7 +14,7 @@ import { pageIfUnavailable } from "@/lib/upstash-response";
 import { parseTtlOverride, testHooksAllowed } from "@/lib/test-hooks";
 import { isValidVisitIdFormat } from "@/lib/visit-id";
 import {
-  getVisitByInheritedFrom,
+  findExistingFreshChild,
   remintFromOrExisting,
 } from "@/lib/visits";
 
@@ -55,15 +55,15 @@ export default async function FreshPage({ params, searchParams }: Props) {
     ? parseTtlOverride(h.get("x-senjafuda-test-ttl"))
     : undefined;
 
-  let inherited: string | null = null;
+  let parentPublicId: string | null = null;
   try {
-    inherited = visitPublicId(v);
+    parentPublicId = visitPublicId(v);
   } catch {
-    inherited = null;
+    parentPublicId = null;
   }
 
-  if (inherited) {
-    const existing = await getVisitByInheritedFrom(inherited);
+  if (parentPublicId) {
+    const existing = await findExistingFreshChild(parentPublicId);
     if (existing) {
       const freshN = signFreshLink({ visitId: existing.id, ttlSec: ttl });
       return <StaleVisitPage visitId={existing.id} freshN={freshN} />;

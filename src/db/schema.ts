@@ -68,15 +68,20 @@ export const visits = pgTable(
     swept: boolean("swept").notNull().default(false),
     rateLimited: boolean("rate_limited").notNull().default(false),
     lateFetches: integer("late_fetches").notNull().default(0),
-    /** Parent visit public_id; unique when set (spec 004 R2). */
+    /** Parent visit public_id (lineage; may duplicate for pre-R2 remints). */
     inheritedFrom: text("inherited_from"),
+    /**
+     * Spec 004 R2: parent public_id for race-safe one-child remints.
+     * Unique when set; null on `/` mints and all pre-R2 rows.
+     */
+    freshParent: text("fresh_parent"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("visits_inherited_from_uidx")
-      .on(t.inheritedFrom)
-      .where(sql`${t.inheritedFrom} IS NOT NULL`),
+    uniqueIndex("visits_fresh_parent_uidx")
+      .on(t.freshParent)
+      .where(sql`${t.freshParent} IS NOT NULL`),
   ],
 );
 

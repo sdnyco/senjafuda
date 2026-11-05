@@ -106,6 +106,7 @@ export async function POST(request: NextRequest) {
         rate_limited: r.rateLimited,
         late_fetches: r.lateFetches,
         inherited_from: r.inheritedFrom,
+        fresh_parent: r.freshParent,
         completed_at: r.completedAt ? r.completedAt.toISOString() : null,
         updated_at: r.updatedAt.toISOString(),
       }),

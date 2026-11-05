@@ -19,21 +19,24 @@ Breaks the crawler remint fan-out from spec 003 R1 without changing draw conditi
 
 ### Behaviour (R2 — fast crawlers)
 
-- Each parent visit spawns **at most one** child: lookup by `inherited_from = public_id(A)` (**including unknown well-formed A** — R2 overrides R1.6’s null `inherited_from` so uniqueness can apply).
-- First valid `/fresh` → mint B, redirect to B’s draw.
-- Later valid `/fresh` for A (or lost insert race) → **mint nothing**, render **B’s stale page** (B’s own `fresh` link only). Never redirect into B’s draw/census.
-- Race-safe via unique partial index on `inherited_from` WHERE NOT NULL + insert-and-catch-conflict.
+- Each parent visit spawns **at most one** child.
+- A remint from A sets **both** `inherited_from = public_id(A)` (same meaning as before) and `fresh_parent = public_id(A)` on the child (including unknown well-formed A).
+- “Child already exists” for A: a visit with `fresh_parent = public_id(A)`, **or** (pre-R2 history) the earliest visit with `inherited_from = public_id(A)`. If one exists → that child’s stale page, mint nothing.
+- First valid `/fresh` with no child → mint B, redirect to B’s draw.
+- Later valid `/fresh` (or lost insert race) → mint nothing, render **B’s stale page**. Never redirect into B’s draw/census.
+- Race safety: unique partial index on `fresh_parent` WHERE NOT NULL + insert-and-catch-conflict.
 - Effect: a chain (A→B→C…), bounded by the per-source mint cap — not a tree.
 
 ### Migration
 
-- `drizzle/0003_inherited_from_unique.sql`: clear duplicate `inherited_from` on later siblings (keep earliest child), then `CREATE UNIQUE INDEX IF NOT EXISTS visits_inherited_from_uidx`. Re-runnable. Pre-R2 fan-out left duplicates; canvas/census untouched.
+- `drizzle/0003_fresh_parent.sql`: **additive only** — `ADD COLUMN IF NOT EXISTS fresh_parent` + `CREATE UNIQUE INDEX IF NOT EXISTS visits_fresh_parent_uidx`. **No UPDATE/DELETE** of existing rows. `inherited_from` and all historical rows untouched (pre-R2 duplicates remain as lineage).
 
 ### Touch points
 
-- `StaleVisitPage` / `FreshLinkExpiredPage`; `remintFromOrExisting` / `getVisitByInheritedFrom`
+- `StaleVisitPage` / `FreshLinkExpiredPage`; `findExistingFreshChild` / `remintFromOrExisting`
 - Draw page, write routes, `fresh/page.tsx`
 - `content/era1/llms-header.md`, `data/README.md` dated note
+- `.cursor/rules/no-data-edits-in-migrations.mdc`
 - `scripts/era1-smoke.mjs`: checks `004-1`…`004-9`
 
 ## Verification

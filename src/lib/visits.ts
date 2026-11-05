@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { drawings, visits, type Drawing, type Visit } from "@/db/schema";
 import {
@@ -17,6 +17,7 @@ const DRAWN_USABLE_MS = 30 * 60 * 1000;
 export async function issueVisit(
   uaHeader: string | null,
   inheritedFromPublicId: string | null = null,
+  freshParentPublicId: string | null = null,
 ): Promise<Visit> {
   const db = getDb();
   const classified = classifyUserAgent(uaHeader);
@@ -37,6 +38,7 @@ export async function issueVisit(
     rateLimited: false,
     lateFetches: 0,
     inheritedFrom: inheritedFromPublicId,
+    freshParent: freshParentPublicId,
     completedAt: null,
     updatedAt: now,
   };
@@ -124,16 +126,28 @@ function isUniqueViolation(err: unknown): boolean {
   return /unique|duplicate|23505/i.test(parts.join("\n"));
 }
 
-export async function getVisitByInheritedFrom(
+/**
+ * Spec 004 R2: child of A is a visit with fresh_parent = public_id(A),
+ * or (pre-R2) the earliest visit with inherited_from = public_id(A).
+ */
+export async function findExistingFreshChild(
   parentPublicId: string,
 ): Promise<Visit | null> {
   const db = getDb();
-  const rows = await db
+  const byFresh = await db
+    .select()
+    .from(visits)
+    .where(eq(visits.freshParent, parentPublicId))
+    .limit(1);
+  if (byFresh[0]) return byFresh[0];
+
+  const byInherited = await db
     .select()
     .from(visits)
     .where(eq(visits.inheritedFrom, parentPublicId))
+    .orderBy(asc(visits.issuedAt), asc(visits.id))
     .limit(1);
-  return rows[0] ?? null;
+  return byInherited[0] ?? null;
 }
 
 export type RemintResult =
@@ -142,33 +156,37 @@ export type RemintResult =
 
 /**
  * Spec 004 R2: at most one child remint per parent.
- * `inherited_from` is always public_id(parentId) when the salt is available,
- * including for unknown but well-formed parent ids.
+ * Sets both inherited_from and fresh_parent to public_id(parent) when salt
+ * is available (including unknown well-formed parent ids).
  */
 export async function remintFromOrExisting(
   oldVisitId: string,
   uaHeader: string | null,
 ): Promise<RemintResult> {
-  let inherited: string | null = null;
+  let parentPublicId: string | null = null;
   try {
-    inherited = visitPublicId(oldVisitId);
+    parentPublicId = visitPublicId(oldVisitId);
   } catch {
-    inherited = null;
+    parentPublicId = null;
   }
 
-  if (inherited) {
-    const existing = await getVisitByInheritedFrom(inherited);
+  if (parentPublicId) {
+    const existing = await findExistingFreshChild(parentPublicId);
     if (existing) {
       return { kind: "existing", visit: existing };
     }
   }
 
   try {
-    const visit = await issueVisit(uaHeader, inherited);
+    const visit = await issueVisit(
+      uaHeader,
+      parentPublicId,
+      parentPublicId,
+    );
     return { kind: "created", visit };
   } catch (err) {
-    if (inherited && isUniqueViolation(err)) {
-      const winner = await getVisitByInheritedFrom(inherited);
+    if (parentPublicId && isUniqueViolation(err)) {
+      const winner = await findExistingFreshChild(parentPublicId);
       if (winner) return { kind: "existing", visit: winner };
     }
     throw err;
@@ -181,7 +199,7 @@ export async function remintFrom(
   uaHeader: string | null,
 ): Promise<Visit> {
   if (!oldVisitId) {
-    return issueVisit(uaHeader, null);
+    return issueVisit(uaHeader, null, null);
   }
   const result = await remintFromOrExisting(oldVisitId, uaHeader);
   return result.visit;

@@ -1,5 +1,5 @@
 {
-  "frame_size": 5,
+  "frame_size": 9,
   "cells": [
     {
       "x": 0,
@@ -17,6 +17,144 @@
       "x": 1,
       "y": -1,
       "pattern": "p9",
+      "seed": false
+    },
+    {
+      "x": 2,
+      "y": 0,
+      "pattern": "p9",
+      "seed": false
+    },
+    {
+      "x": 1,
+      "y": 2,
+      "pattern": "p11",
+      "seed": false
+    },
+    {
+      "x": 1,
+      "y": -2,
+      "pattern": "p14",
+      "seed": false
+    },
+    {
+      "x": 0,
+      "y": -2,
+      "pattern": "p12",
+      "seed": false
+    },
+    {
+      "x": 0,
+      "y": -1,
+      "pattern": "p11",
+      "seed": false
+    },
+    {
+      "x": -3,
+      "y": -3,
+      "pattern": "p6",
+      "seed": false
+    },
+    {
+      "x": -1,
+      "y": -2,
+      "pattern": "p14",
+      "seed": false
+    },
+    {
+      "x": -2,
+      "y": -1,
+      "pattern": "p8",
+      "seed": false
+    },
+    {
+      "x": -2,
+      "y": 2,
+      "pattern": "p12",
+      "seed": false
+    },
+    {
+      "x": 3,
+      "y": -1,
+      "pattern": "p8",
+      "seed": false
+    },
+    {
+      "x": -3,
+      "y": -1,
+      "pattern": "p2",
+      "seed": false
+    },
+    {
+      "x": 0,
+      "y": 2,
+      "pattern": "p7",
+      "seed": false
+    },
+    {
+      "x": 0,
+      "y": 1,
+      "pattern": "p13",
+      "seed": false
+    },
+    {
+      "x": 1,
+      "y": 3,
+      "pattern": "p9",
+      "seed": false
+    },
+    {
+      "x": -2,
+      "y": 3,
+      "pattern": "p5",
+      "seed": false
+    },
+    {
+      "x": -3,
+      "y": 2,
+      "pattern": "p2",
+      "seed": false
+    },
+    {
+      "x": -2,
+      "y": 0,
+      "pattern": "p11",
+      "seed": false
+    },
+    {
+      "x": 2,
+      "y": -2,
+      "pattern": "p1",
+      "seed": false
+    },
+    {
+      "x": -3,
+      "y": 3,
+      "pattern": "p7",
+      "seed": false
+    },
+    {
+      "x": 3,
+      "y": 3,
+      "pattern": "p9",
+      "seed": false
+    },
+    {
+      "x": -3,
+      "y": 1,
+      "pattern": "p13",
+      "seed": false
+    },
+    {
+      "x": -4,
+      "y": 0,
+      "pattern": "p8",
+      "seed": false
+    },
+    {
+      "x": -1,
+      "y": 4,
+      "pattern": "p2",
       "seed": false
     }
   ]

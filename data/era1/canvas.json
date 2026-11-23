@@ -156,6 +156,30 @@
       "y": 4,
       "pattern": "p2",
       "seed": false
+    },
+    {
+      "x": 1,
+      "y": -3,
+      "pattern": "p4",
+      "seed": false
+    },
+    {
+      "x": 2,
+      "y": -4,
+      "pattern": "p2",
+      "seed": false
+    },
+    {
+      "x": -1,
+      "y": -4,
+      "pattern": "p11",
+      "seed": false
+    },
+    {
+      "x": -1,
+      "y": -3,
+      "pattern": "p12",
+      "seed": false
     }
   ]
 }
